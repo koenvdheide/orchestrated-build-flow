@@ -1,0 +1,54 @@
+# orchestrated-build-flow
+
+A [Claude Code](https://claude.ai/code) plugin that runs a non-trivial build all the way from brainstorming through spec, plan, and subagent-driven implementation as one coordinated pipeline, with three Codex review checkpoints along the way.
+
+## What it does
+
+One orchestrator owns the whole [superpowers](https://github.com/obra/superpowers) pipeline (prior-art grounding, brainstorm, spec, plan, execute) and inserts three independent Codex convergence checkpoints: the spec (red-team), the plan (plan-review), and the implementation diff (diff-review). Each checkpoint writes a durable receipt, and every phase transition is gated on the prior checkpoint's receipt, so a skipped or stale review is caught and re-run rather than slipping through. That also makes the flow resumable: if a session drops mid-build, it continues at the first phase whose receipt is missing or stale.
+
+It runs the superpowers sub-skills unchanged (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch) and owns only the transitions between them and the Codex gates.
+
+## The pipeline
+
+- 0 Preflight: check Codex and the required superpowers skills are reachable; load or start the run state.
+- 1 Prior art: a lightweight scan (web, GitHub, docs, and literature where it fits) to ground the design.
+- 2 Brainstorm: the brainstorming skill, starting from the prior-art brief.
+- 3 Checkpoint (spec): Codex red-team to convergence, then one user approval.
+- 4 Plan: the writing-plans skill.
+- 5 Checkpoint (plan): Codex plan-review to convergence.
+- 6 Execute: subagent-driven implementation.
+- 7 Checkpoint (diff): Codex diff-review over the full change surface.
+- 8 Finish: branch cleanup and PR preparation (stops before opening or commenting on any PR).
+
+## Prerequisites
+
+- [Claude Code](https://claude.ai/code).
+- The `codex` plugin: installed automatically as a dependency from the same marketplace. It wraps the [Codex CLI](https://github.com/openai/codex), which must be installed and on PATH.
+- The `superpowers-extended-cc` skills (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch): a separate install (a fork of [obra/superpowers](https://github.com/obra/superpowers)). The Phase 0 preflight stops early and names any that are missing.
+- git and bash (Git Bash on Windows).
+
+## Installation
+
+Via the `agent-tools` marketplace:
+
+```text
+/plugin marketplace add koenvdheide/agent-tools
+/plugin install orchestrated-build-flow@agent-tools
+/reload-plugins
+```
+
+Refresh later with `/plugin marketplace update agent-tools`, then `/reload-plugins`.
+
+## Usage
+
+Claude invokes the skill when a build task matches, or you can invoke it directly:
+
+```text
+/orchestrated-build-flow:orchestrated-build-flow add CSV export to the reports module
+```
+
+For design-only or exploratory work you are not committing to build, use the brainstorming skill on its own instead.
+
+## License
+
+MIT
