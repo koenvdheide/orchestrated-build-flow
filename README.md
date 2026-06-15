@@ -24,7 +24,13 @@ It runs the superpowers sub-skills unchanged (brainstorming, writing-plans, suba
 
 - [Claude Code](https://claude.ai/code).
 - The `codex` plugin: installed automatically as a dependency from the same marketplace. It wraps the [Codex CLI](https://github.com/openai/codex), which must be installed and on PATH.
-- The `superpowers-extended-cc` skills (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch): a separate install (a fork of [obra/superpowers](https://github.com/obra/superpowers)). The Phase 0 preflight stops early and names any that are missing.
+- The `superpowers-extended-cc` skills (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch). Install the plugin that provides them, then reload:
+  ```text
+  /plugin marketplace add pcvelz/superpowers
+  /plugin install superpowers-extended-cc@superpowers-extended-cc-marketplace
+  /reload-plugins
+  ```
+  The Phase 0 preflight stops early and names any of these that are missing. Install this specific fork: the skill uses the `superpowers-extended-cc:` namespace, which the upstream [obra/superpowers](https://github.com/obra/superpowers) (namespace `superpowers:`) does not provide.
 - git and bash (Git Bash on Windows).
 
 ## Installation
