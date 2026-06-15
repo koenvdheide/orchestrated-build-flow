@@ -90,8 +90,6 @@ Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. On
 
 **Hashing.** Use one consistent, canonical method so a later session recomputes the same value: artifact hashes are SHA-256 over the raw file bytes (e.g. `sha256sum <file>`). The Checkpoint 3 composite surface hash is SHA-256 over the per-file `sha256sum` lines (each `<hash>  <repo-relative-path>`, sorted by path) followed by the `git diff` text — or, outside a git repo, the per-file lines followed by the concatenated file bytes.
 
-**Keep it out of version control.** The state file, specs, and plans under `docs/superpowers/` are transient working files, not part of the target repo. Add `docs/superpowers/` to the repo's `.gitignore` (or `.git/info/exclude`) so a user's own commits never capture run state, findings, or decisions.
-
 ```json
 {
   "run": "2026-06-02-export-csv",

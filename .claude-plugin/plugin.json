@@ -1,6 +1,6 @@
 {
   "name": "orchestrated-build-flow",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Orchestrates the superpowers brainstorming, spec, plan, and execute pipeline with three Codex convergence checkpoints (spec red-team, plan-review, diff-review) and receipt-gated, resumable phase transitions.",
   "author": {
     "name": "Koen van der Heide",
