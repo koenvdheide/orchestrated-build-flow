@@ -1,10 +1,10 @@
 # orchestrated-build-flow
 
-A [Claude Code](https://claude.ai/code) plugin that runs a non-trivial build all the way from brainstorming through spec, plan, and subagent-driven implementation as one coordinated pipeline, with three Codex review checkpoints along the way.
+A [Claude Code](https://claude.ai/code) plugin that runs a non-trivial build all the way from brainstorming through spec, plan, and subagent-driven implementation as one coordinated pipeline with three Codex review checkpoints.
 
 ## What it does
 
-One orchestrator owns the whole [superpowers](https://github.com/obra/superpowers) pipeline (prior-art grounding, brainstorm, spec, plan, execute) and inserts three independent Codex convergence checkpoints: the spec (red-team), the plan (plan-review), and the implementation diff (diff-review). Each checkpoint writes a durable receipt, and every phase transition is gated on the prior checkpoint's receipt, so a skipped or stale review is caught and re-run rather than slipping through. That also makes the flow resumable: if a session drops mid-build, it continues at the first phase whose receipt is missing or stale.
+One orchestrator owns the whole [superpowers](https://github.com/pcvelz/superpowers) pipeline (prior-art grounding, brainstorm, spec, plan, execute) and inserts three independent Codex convergence checkpoints: the spec (red-team), the plan (plan-review), and the implementation diff (diff-review). Each checkpoint writes a durable receipt, and every phase transition is gated on the prior checkpoint's receipt, so the orchestrator catches a skipped or stale review and re-runs it. That also makes the flow resumable. If a session drops mid-build, it continues at the first phase whose receipt is missing or stale.
 
 It runs the superpowers sub-skills unchanged (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch) and owns only the transitions between them and the Codex gates.
 
@@ -30,7 +30,7 @@ It runs the superpowers sub-skills unchanged (brainstorming, writing-plans, suba
   /plugin install superpowers-extended-cc@superpowers-extended-cc-marketplace
   /reload-plugins
   ```
-  The Phase 0 preflight stops early and names any of these that are missing. Install this specific fork: the skill uses the `superpowers-extended-cc:` namespace, which the upstream [obra/superpowers](https://github.com/obra/superpowers) (namespace `superpowers:`) does not provide.
+  The Phase 0 preflight stops early and names any of these that are missing. Install this specific fork, because the skill uses the `superpowers-extended-cc:` namespace, which the upstream [obra/superpowers](https://github.com/obra/superpowers) (namespace `superpowers:`) does not provide.
 - git and bash (Git Bash on Windows).
 
 ## Installation
@@ -43,7 +43,7 @@ Via the `agent-tools` marketplace:
 /reload-plugins
 ```
 
-Refresh later with `/plugin marketplace update agent-tools`, then `/reload-plugins`.
+Refresh later with `/plugin marketplace update agent-tools`, then `/plugin update orchestrated-build-flow@agent-tools` and `/reload-plugins`.
 
 ## Usage
 
@@ -53,7 +53,7 @@ Claude invokes the skill when a build task matches, or you can invoke it directl
 /orchestrated-build-flow:orchestrated-build-flow add CSV export to the reports module
 ```
 
-For design-only or exploratory work you are not committing to build, use the brainstorming skill on its own instead.
+For design-only or exploratory work you are not committing to build, use the brainstorming skill on its own.
 
 ## License
 
