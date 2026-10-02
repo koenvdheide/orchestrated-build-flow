@@ -40,7 +40,7 @@ One table owns the phase order, the hand-off intercepts, the checkpoint modes an
 Before entering a phase whose `Entry requires` column names a receipt, read the state file and assert that receipt **and every receipt before it in the pipeline**:
 
 1. it exists, AND
-2. what it recorded about its artifact still matches the current state — a file hash for the spec and plan, the three recorded parts for the change surface, AND
+2. what it recorded about its artifact still matches the current state — a file hash for the spec and plan, every recorded part for the change surface, AND
 3. `userApproved` is true where the column says so, AND
 4. for a downstream receipt, its `upstreamHash` matches the **current** hash of the upstream artifact.
 
@@ -72,7 +72,7 @@ Spec and plan hashes are SHA-256 over the raw file bytes.
 
 ## State file
 
-Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. One active run at a time, one receipt per checkpoint. A receipt records the artifact path, its hash (or for checkpoint 3 the three surface parts), the Codex mode, rounds run, the final verdict, the findings ledger, user decisions, `userApproved` where the pipeline table requires it, and on a downstream receipt `upstreamHash` — the hash of the upstream artifact supplied to the round that converged.
+Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. One active run at a time, one receipt per checkpoint. A receipt records the artifact path, its hash (or for checkpoint 3 the recorded surface parts), the Codex mode, rounds run, the final verdict, the findings ledger, user decisions, `userApproved` where the pipeline table requires it, and on a downstream receipt `upstreamHash` — the hash of the upstream artifact supplied to the round that converged.
 
 ```json
 {
