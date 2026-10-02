@@ -13,7 +13,7 @@ It uses the superpowers sub-skill files unmodified (brainstorming, writing-plans
 ## The pipeline
 
 - 0 Preflight: check Codex and the required superpowers skills are reachable; load or start the run state.
-- 1 Prior art: a lightweight scan (web, GitHub, docs, and literature where it fits) to ground the design. Unless the work is clearly public, it confirms before searching and honours an opt-out.
+- 1 Prior art: a lightweight scan (web, GitHub, docs, and literature where it fits) to ground the design. Unless the work is clearly public or non-sensitive, it confirms before searching and honours an opt-out.
 - 2 Brainstorm: the brainstorming skill, starting from the prior-art brief. Its design document is the spec.
 - 3 Checkpoint (spec): Codex red-team to convergence, then one user approval.
 - 4 Plan: the writing-plans skill.

@@ -30,21 +30,21 @@ One table owns the phase order, the hand-off intercepts, the checkpoint modes an
 | **4 Plan** | Invoke writing-plans. Its execution-method question is the trigger for checkpoint 2: run that first. | valid spec receipt with `userApproved: true` |
 | **5 Checkpoint: plan** | `plan-review` convergence loop on the plan, spec supplied as reference for alignment. Write the plan receipt, recording the spec hash supplied to the converged round. | writing-plans reported a plan it considers finished |
 | **6 Execute (SDD)** | Pin SDD: skip writing-plans' execution-method question (no parallel-session offer, no manual execution). Worktree handling is inherited from using-git-worktrees / SDD; do not re-invent it. | valid plan receipt |
-| **7 Checkpoint: diff** | `diff-review` convergence loop on the change surface. Supplements SDD's own final reviewer; does not replace it. Write the diff receipt. | SDD reported its tasks complete **and** its final reviewer ran. Without that, re-enter phase 6 rather than reviewing partial work |
+| **7 Checkpoint: diff** | `diff-review` convergence loop on the change surface, plan supplied as reference for alignment so the receipt's `upstreamHash` records a plan the reviewer actually saw. Supplements SDD's own final reviewer; does not replace it. Write the diff receipt. | SDD reported its tasks complete **and** its final reviewer ran. Without that, re-enter phase 6 rather than reviewing partial work |
 | **8 Finish** | `finishing-a-development-branch` for the merge, PR and cleanup decision. Stop before any public publish step — the final click is the user's. | valid diff receipt |
 
 **Execution depth scales to the work.** Phase 6 always runs *through* a subagent. What scales is the review depth on top: a multi-task or non-trivial plan gets SDD's full per-task cycle (implementer → spec reviewer → quality reviewer); a genuinely trivial single-task plan can run one implementer and lean on checkpoint 3. The three Codex checkpoints never scale away.
 
 ## Receipt gating
 
-Before entering a phase whose `Entry requires` column names a receipt, read the state file and assert that receipt:
+Before entering a phase whose `Entry requires` column names a receipt, read the state file and assert that receipt **and every receipt before it in the pipeline**:
 
 1. it exists, AND
 2. its `artifactHash` matches the **current** hash of that artifact, AND
 3. `userApproved` is true where the column says so, AND
 4. for a downstream receipt, its `upstreamHash` matches the **current** hash of the upstream artifact.
 
-A failed assertion sends you back to run that checkpoint. Assertion 4 is what makes an upstream edit bite: change the spec after the plan was reviewed and the plan receipt stops validating, so checkpoint 2 re-runs. There is no separate stale flag — invalidity is derived from the hashes, so there is no second representation to keep in sync.
+A failed assertion sends you back to run that checkpoint. Assertion 4 is what makes an upstream edit bite: change the spec after the plan was reviewed and the plan receipt stops validating, so checkpoint 2 re-runs. Validating the whole chain is what stops that edit slipping through later — phase 8 names only the diff receipt, and the diff surface does not contain the spec, so a spec edit is invisible there unless the plan receipt is checked too. There is no separate stale flag; invalidity is derived from the hashes, so there is no second representation to keep in sync.
 
 **Before running any checkpoint, establish that its producer phase finished** — the `Entry requires` column says what counts. Receipts record that a review happened, not that the work under review was complete, so a dropped session can leave a half-written artifact that satisfies every gate below it. When you cannot establish completion, re-enter the producer phase instead of reviewing its output.
 
@@ -53,9 +53,8 @@ A failed assertion sends you back to run that checkpoint. Assertion 4 is what ma
 Mechanics (round shape, gates, across-round prompt construction, the re-review block, drift detection) live in the `codex` skill's **Convergence Mode (iterative review)** section. Do not restate them here. This section pins only what the orchestrator adds:
 
 - **Findings ledger.** The orchestrator keeps its own ledger so a resumed session knows what was decided: each finding carries `id`, `title`, `severity` (breakage / simplification — for `plan-review` and `diff-review`, read breakage as correctness or safety, simplification as over-engineering or redundancy) and `status`, one of **`open`**, **`addressed`** (fix made and re-verified) or **`skipped`** (decided not to act, with a recorded reason). Those are the status words the codex skill's re-review block already uses, so they go straight across with no translation. There is no silent "deferred": postponing a finding means `skipped` with a reason the user signed off on. Codex returns prose, so the ledger is yours to build from its output, not something it emits.
-- **Apply gate.** A **clear win** (correctness or quality fix, no scope or behaviour change) is applied automatically. Anything that changes scope or behaviour — including a simplification that drops or merges functionality — is a **tradeoff**: pause and surface it to the user as an inline question. Never auto-apply a tradeoff.
-- **Convergence** is an explicitly affirmative verdict AND no finding left `open`. Ask for the verdict on its own final line so it reads without interpreting prose. The loop also ends on user stop or on the drift the codex skill describes.
-- Re-state the original one-sentence brief at every continue-gate, and weight Simplifications **at least as heavily as** Breakage — the default bias runs toward addition.
+- **Apply gate, overriding the dependency's Gate 1.** Where the codex skill asks the user which fixes to apply each round, the orchestrator decides by class instead: a **clear win** (correctness or quality fix, no scope or behaviour change) is applied automatically. Anything that changes scope or behaviour — including a simplification that drops or merges functionality — is a **tradeoff**: pause and surface it to the user as an inline question. Never auto-apply a tradeoff.
+- **Convergence, for receipt purposes,** also requires no finding left `open` in the ledger. The verdict and drift conditions are the dependency's.
 
 **Fix routing for checkpoint 3.** A non-trivial finding gets a fresh fix-subagent with a narrow patch brief and required validation, consistent with SDD's "don't fix manually". Only a trivial finding (a one-word doc typo) is applied directly and re-verified; a subagent for a one-liner is ceremony.
 
@@ -63,12 +62,12 @@ Mechanics (round shape, gates, across-round prompt construction, the re-review b
 
 The checkpoint 3 artifact is the whole change surface, not just `git diff <base>...HEAD`. One canonical definition, used for both the review and the hash so a later session recomputes the same value:
 
-- **In a git repo:** every file that `git status --porcelain` reports as staged, unstaged or untracked, plus `git log <base>..HEAD`.
-- **Outside a repo:** the set of created or changed files.
+- **In a git repo:** one payload, concatenated in this order — `git log <base>..HEAD`, then `git diff <base>` (working tree against the base, so it carries committed, staged and unstaged changes, and represents deletions as diff text rather than as bytes that no longer exist), then for each path `git status --porcelain -uall` reports as untracked, that path followed by its contents, sorted by path. `-uall` matters: plain `--porcelain` collapses an untracked directory into a single entry, so its files would never be enumerated.
+- **Outside a repo:** the created or changed files, each path followed by its contents, sorted by path.
 
 **Exclude the run state file and anything else under `docs/superpowers/` from the surface.** The state file is run metadata, it usually sits in the untracked set, and the diff receipt is written into it — so including it would mean every receipt invalidated its own hash the moment it was saved.
 
-Hash it as SHA-256 over the per-file `sha256sum` lines (each `<hash>  <repo-relative-path>`, sorted by path), followed by `git log <base>..HEAD`, or outside a repo followed by nothing. Individual artifact hashes (spec, plan) are SHA-256 over the raw file bytes. A surface definition and a hash recipe that disagree give two sessions two different digests for identical work, which is why there is exactly one of each here.
+Hash is SHA-256 over that payload. Reviewing and hashing the same payload is the point: a surface definition and a hash recipe that disagree hand two sessions two different digests for identical work. Individual artifact hashes (spec, plan) are SHA-256 over the raw file bytes.
 
 ## State file
 
