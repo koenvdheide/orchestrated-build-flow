@@ -40,7 +40,7 @@ One table owns the phase order, the hand-off intercepts, the checkpoint modes an
 Before entering a phase whose `Entry requires` column names a receipt, read the state file and assert that receipt **and every receipt before it in the pipeline**:
 
 1. it exists, AND
-2. its `artifactHash` matches the **current** hash of that artifact, AND
+2. what it recorded about its artifact still matches the current state — a file hash for the spec and plan, the three recorded parts for the change surface, AND
 3. `userApproved` is true where the column says so, AND
 4. for a downstream receipt, its `upstreamHash` matches the **current** hash of the upstream artifact.
 
@@ -58,20 +58,21 @@ Mechanics (round shape, gates, across-round prompt construction, the re-review b
 
 **Fix routing for checkpoint 3.** A non-trivial finding gets a fresh fix-subagent with a narrow patch brief and required validation, consistent with SDD's "don't fix manually". Only a trivial finding (a one-word doc typo) is applied directly and re-verified; a subagent for a one-liner is ceremony.
 
-## Change surface and hashing
+## Change surface
 
-The checkpoint 3 artifact is the whole change surface, not just `git diff <base>...HEAD`. One canonical definition, used for both the review and the hash so a later session recomputes the same value:
+Checkpoint 3 reviews the whole surface, not just `git diff <base>...HEAD`. Supply the reviewer `git log <base>..HEAD`, `git diff <base>` (the working tree against the base, so it carries committed, staged and unstaged changes, and shows deletions as diff text), and the contents of every path `git status --porcelain -uall` reports as untracked. Use `-uall`: plain `--porcelain` collapses an untracked directory into one entry, so its files would never be enumerated. Outside a repo, the surface is the created or changed files.
 
-- **In a git repo:** one payload, concatenated in this order — `git log <base>..HEAD`, then `git diff <base>` (working tree against the base, so it carries committed, staged and unstaged changes, and represents deletions as diff text rather than as bytes that no longer exist), then for each path `git status --porcelain -uall` reports as untracked, that path followed by its contents, sorted by path. `-uall` matters: plain `--porcelain` collapses an untracked directory into a single entry, so its files would never be enumerated.
-- **Outside a repo:** the created or changed files, each path followed by its contents, sorted by path.
+**Exclude the run state file and anything else under `docs/superpowers/` from the surface.** It is run metadata, it sits in the untracked set, and the diff receipt is written into it — so including it would mean every receipt invalidating itself the moment it was saved.
 
-**Exclude the run state file and anything else under `docs/superpowers/` from the surface.** The state file is run metadata, it usually sits in the untracked set, and the diff receipt is written into it — so including it would mean every receipt invalidated its own hash the moment it was saved.
+**The diff receipt records three parts:** `head` (`git rev-parse HEAD`), `diffHash` (SHA-256 of the `git diff <base>` text) and `untracked` (each untracked path with its own `sha256sum`, excluded paths omitted). Resume re-runs all three and compares them part-wise.
 
-Hash is SHA-256 over that payload. Reviewing and hashing the same payload is the point: a surface definition and a hash recipe that disagree hand two sessions two different digests for identical work. Individual artifact hashes (spec, plan) are SHA-256 over the raw file bytes.
+The receipt stores parts because it only has to answer whether the surface moved, which a comparison settles without a canonical fingerprint. Comparing parts means there is no concatenation order, no sort stability and no deletion encoding for a later session to get wrong, and each part catches a distinct kind of drift: a commit moves `head`, an edit to an already-modified file changes `diffHash`, and a new or removed untracked file changes `untracked`. Reproducibility stays git's problem.
+
+Spec and plan hashes are SHA-256 over the raw file bytes.
 
 ## State file
 
-Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. One active run at a time, one receipt per checkpoint. A receipt records the artifact path and hash, the Codex mode, rounds run, the final verdict, the findings ledger, user decisions, `userApproved` where the pipeline table requires it, and on a downstream receipt `upstreamHash` — the hash of the upstream artifact supplied to the round that converged.
+Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. One active run at a time, one receipt per checkpoint. A receipt records the artifact path, its hash (or for checkpoint 3 the three surface parts), the Codex mode, rounds run, the final verdict, the findings ledger, user decisions, `userApproved` where the pipeline table requires it, and on a downstream receipt `upstreamHash` — the hash of the upstream artifact supplied to the round that converged.
 
 ```json
 {
