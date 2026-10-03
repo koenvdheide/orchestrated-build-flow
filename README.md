@@ -52,7 +52,7 @@ Refresh later with `/plugin marketplace update agent-tools`, then `/plugin updat
 Claude invokes the skill when a build task matches, or you can invoke it directly:
 
 ```text
-/orchestrated-build-flow:orchestrated-build-flow add CSV export to the reports module
+/orchestrated-build-flow add CSV export to the reports module
 ```
 
 For design-only or exploratory work you are not committing to build, use the brainstorming skill on its own.
