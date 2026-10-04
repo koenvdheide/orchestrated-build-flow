@@ -23,7 +23,7 @@ One table owns the phase order, the hand-off intercepts, the checkpoint modes an
 
 | Phase | What happens | Entry requires |
 | --- | --- | --- |
-| **0 Preflight** | Two reachability checks NOW, before brainstorming: (1) the `codex` plugin / Codex CLI is reachable; (2) the required `superpowers-extended-cc` skills are available — `brainstorming`, `writing-plans`, `subagent-driven-development`, `finishing-a-development-branch`. If any is missing, STOP and name it as an unmet prerequisite rather than failing mid-flow. Then initialise or load the state file; if one already exists, reconcile resume-vs-start-over with the user. In superpowers the design *is* the spec (one artifact), so there are exactly three Codex loops. | — |
+| **0 Preflight** | Two reachability checks NOW, before brainstorming: (1) the `third-party-reviewers` review tool offers Codex: `review_start` is available and its `reviewer` accepts `codex`; (2) the required `superpowers-extended-cc` skills are available — `brainstorming`, `writing-plans`, `subagent-driven-development`, `finishing-a-development-branch`. If any is missing, STOP and name it as an unmet prerequisite rather than failing mid-flow. Then initialise or load the state file; if one already exists, reconcile resume-vs-start-over with the user. In superpowers the design *is* the spec (one artifact), so there are exactly three Codex loops. | — |
 | **1 Prior art** | Ground the design in what exists. **Lightweight scan** — a few targeted searches across the sources that fit the domain: web posts (WebSearch), existing implementations (GitHub), library docs (Context7), academic literature (the lit-search MCPs, Consensus) where the topic warrants. Synthesise a short **Prior-art brief**: closest prior work, what to borrow, how this should differ. Write it into the spec as a `Prior art` section so it grounds both brainstorming and the spec red-team. Escalate to `deep-research` only when the space is rich or unfamiliar, or the user asks. **Privacy gate:** the scan can send the idea and repo context to external services, so unless the work is clearly public or non-sensitive, confirm before any networked search and always honour an opt-out (skip the external scan, rely on local knowledge). Skippable with a stated reason, never silently. | — |
 | **2 Brainstorm** | Invoke brainstorming from the Prior-art brief. Its hand-off to writing-plans is the trigger for checkpoint 1: run that first. | — |
 | **3 Checkpoint: spec** | `red-team` convergence loop on the spec. On convergence, present the converged spec for a **single user approval**. This approval replaces routing through brainstorming's own user-review gate — do not also run that gate. Write the spec receipt with `userApproved: true`. | brainstorming reported a spec it considers finished |
@@ -50,11 +50,11 @@ A failed assertion sends you back to run that checkpoint. Assertion 4 is what ma
 
 ## Convergence loop
 
-Mechanics (round shape, gates, across-round prompt construction, the re-review block, drift detection) live in the `codex` skill's **Convergence Mode (iterative review)** section. Do not restate them here. This section pins only what the orchestrator adds:
+Mechanics (round shape, gates, across-round prompt construction, the `Previously identified findings:` block, drift detection) live in the `third-party-reviewers:codex` skill's **Convergence Mode (iterative review)** section. Do not restate them here. This section pins only what the orchestrator adds:
 
-- **Findings ledger.** The orchestrator keeps its own ledger so a resumed session knows what was decided: each finding carries `id`, `title`, `severity` (breakage / simplification — for `plan-review` and `diff-review`, read breakage as correctness or safety, simplification as over-engineering or redundancy) and `status`, one of **`open`**, **`addressed`** (fix made and re-verified) or **`skipped`** (decided not to act, with a recorded reason). Those are the status words the codex skill's re-review block already uses, so they go straight across with no translation. There is no silent "deferred": postponing a finding means `skipped` with a reason the user signed off on. Codex returns prose, so the ledger is yours to build from its output, not something it emits.
-- **Apply gate, overriding the dependency's Gate 1.** Where the codex skill asks the user which fixes to apply each round, the orchestrator decides by class instead: a **clear win** (correctness or quality fix, no scope or behaviour change) is applied automatically. Anything that changes scope or behaviour — including a simplification that drops or merges functionality — is a **tradeoff**: pause and surface it to the user as an inline question. Never auto-apply a tradeoff.
-- **Convergence, for receipt purposes,** also requires no finding left `open` in the ledger. The verdict and drift conditions are the dependency's.
+- **Findings ledger.** The orchestrator keeps its own ledger so a resumed session knows what was decided: each finding carries `id`, `title`, `severity` (breakage / simplification — for `plan-review` and `diff-review`, read breakage as correctness or safety, simplification as over-engineering or redundancy) and `status`, one of **`unresolved`**, **`applied`** (fix made and re-verified) or **`rejected`** (not acted on: the evidence contradicts it, or the user decided against it, with the reason recorded). Those are the statuses `review_record` records and the codex skill's `Previously identified findings:` block repeats, so they go straight across with no translation. There is no silent "deferred": a finding the user postpones stays `unresolved`, or becomes `rejected` with their reason if they drop it from this brief. The plugin's record lasts only for the session, so the ledger is yours to keep across a resume.
+- **Apply gate, overriding the codex skill's per-round question.** Where the codex skill asks the user which fixes to apply each round, the orchestrator decides by class instead: a **clear win** (correctness or quality fix, no scope or behaviour change) is applied automatically. Anything that changes scope or behaviour — including a simplification that drops or merges functionality — is a **tradeoff**: pause and surface it to the user as an inline question. Never auto-apply a tradeoff. The user's overrule from the findings pane outranks this gate.
+- **Convergence, for receipt purposes,** also requires no finding left `unresolved` in the ledger. The verdict and drift conditions are the dependency's.
 
 **Fix routing for checkpoint 3.** A non-trivial finding gets a fresh fix-subagent with a narrow patch brief and required validation, consistent with SDD's "don't fix manually". Only a trivial finding (a one-word doc typo) is applied directly and re-verified; a subagent for a one-liner is ceremony.
 
@@ -86,8 +86,8 @@ Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. On
       "rounds": 2,
       "verdict": "no redesign-class problem",
       "findings": [
-        {"id": "B1", "title": "missing idempotency guard on retry", "severity": "breakage", "status": "addressed"},
-        {"id": "S1", "title": "drop the separate audit-log table", "severity": "simplification", "status": "skipped"}
+        {"id": "B1", "title": "missing idempotency guard on retry", "severity": "breakage", "status": "applied"},
+        {"id": "S1", "title": "drop the separate audit-log table", "severity": "simplification", "status": "rejected"}
       ],
       "userDecisions": {"S1": "keep — needed for the audit log"},
       "userApproved": true
@@ -107,7 +107,7 @@ Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. On
 
 ## Failure & resume
 
-- **Codex unavailable** (429, timeout, auth, CLI missing) → STOP and ask the user before proceeding unreviewed. **No Gemini fallback.** This is why phase 0 preflights reachability, rather than failing three phases in.
+- **Codex unavailable** (`review_start` missing or refusing Codex, or a run that comes back `failed`: 429, timeout, auth) → STOP and ask the user before proceeding unreviewed. **No Gemini fallback.** This is why phase 0 preflights reachability, rather than failing three phases in.
 - **Superpowers skills missing** → caught at preflight. STOP and name the missing prerequisite.
 - **Skipped checkpoint** → caught at the next phase whose entry names its receipt. Go back and run it; if a downstream artifact was already built, its `upstreamHash` stops matching and that checkpoint re-runs too.
 - **Resume off the state file, not artifact presence.** Resume at the first phase whose entry assertion fails, then establish that phase's producer finished before running its checkpoint.

@@ -24,8 +24,8 @@ It uses the superpowers sub-skill files unmodified (brainstorming, writing-plans
 
 ## Prerequisites
 
-- Claude Code.
-- The `codex` plugin: installed automatically as a dependency from the `agent-tools` marketplace. It wraps the [Codex CLI](https://github.com/openai/codex), which must be installed and on PATH.
+- Claude Code v2.1.287 or later, with mods on.
+- The `third-party-reviewers` plugin: installed automatically as a dependency from the `agent-tools` marketplace. It runs the [Codex CLI](https://github.com/openai/codex), which must be installed and signed in. Up to 1.1.0 this plugin depended on `codex`; once you have updated, you can uninstall that.
 - The `superpowers-extended-cc` skills (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch). Install the plugin that provides them, then reload:
   ```text
   /plugin marketplace add pcvelz/superpowers
