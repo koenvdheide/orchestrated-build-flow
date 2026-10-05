@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Checkpoint } from '../types'
-import { CHECKPOINTS, UPSTREAM, describe, drift, section, sha256 } from './receipts'
+import { ABSOLUTE, CHECKPOINTS, MODE, READY_LINE, UPSTREAM, describe, drift, section, sha256 } from './receipts'
 import type { BuildRun, ReviewerRun, Validity } from './receipts'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
@@ -13,6 +13,7 @@ type Checkout = { top: string; key: string }
 type Answer = { result: string } | { deny: string }
 
 const T = <N extends string>(name: N) => `mcp__orchestrated-build-flow__${name}` as const
+const REVIEW_START = 'mcp__third-party-reviewers__review_start'
 const DIFF = ['--binary', '--no-textconv', '--no-ext-diff']
 
 const armed = atom({ plugin: 'orchestrated-build-flow', key: 'armed' } as const, false)
@@ -138,6 +139,21 @@ async function registerTools($: Engine): Promise<void> {
     inputSchema: { type: 'object', required: ['base'], properties: { base: { type: 'string', description: 'the branch or commit the change is measured against' } } },
   })
   await $.tool.register({
+    name: 'build_review',
+    description: "Start one round of a checkpoint's Codex review (spec, plan or diff) through third-party-reviewers. Sends Codex exactly the material the receipt will certify and records the round. Follow the orchestrated-build-flow skill.",
+    inputSchema: {
+      type: 'object',
+      required: ['checkpoint', 'question', 'instructions'],
+      properties: {
+        checkpoint: { enum: ['spec', 'plan', 'diff'] },
+        artifact: { type: 'string', description: 'the spec or plan file, absolute; not for diff' },
+        question: { type: 'string' },
+        instructions: { type: 'string', description: "the codex skill's mode instructions, plus the Previously identified findings block from round 2 on" },
+        files: { type: 'array', items: { type: 'string' }, description: 'absolute paths for context; not certified' },
+      },
+    },
+  })
+  await $.tool.register({
     name: 'build_status',
     description: "This repository's build run: each checkpoint receipt valid, stale, missing or unverifiable, and this session's review rounds.",
     inputSchema: { type: 'object', properties: {} },
@@ -167,6 +183,46 @@ export const register: Register = on => {
       const run: BuildRun = { id: crypto.randomUUID(), base: commit.trim(), receipts: {} }
       await $.store.set(storeKey(c), run)
       return { result: JSON.stringify({ checkout: c.top, base: run.base }) }
+    }),
+  )
+
+  on('tool.call', { tool: T('build_review') }, async ($, e) =>
+    exclusive(async () => {
+      const input = e as unknown as { checkpoint: Checkpoint; artifact?: string; question: string; instructions: string; files?: string[] }
+      const cp = input.checkpoint
+      const c = await checkout($)
+      const run = await loadRun($, c)
+      if (!run) throw new Error(`No build run in ${c.top}; call build_start first.`)
+      const up = UPSTREAM[cp]
+      if (up !== null) {
+        const u = await checked($, c, run, up, await liveRuns($))
+        if (u.state !== 'valid') throw new Error(`The ${up} receipt is ${describe(u)}; checkpoint ${cp} reviews against it.`)
+      }
+      const artifact = cp === 'diff' ? null : input.artifact ?? null
+      if (cp !== 'diff' && (artifact === null || !ABSOLUTE.test(artifact))) throw new Error(`build_review for ${cp} needs artifact, the ${cp} file's absolute path.`)
+      const text = await material($, c, run, cp, artifact)
+      // Withdraw the receipt this round may overturn before the reviewer starts.
+      if (run.receipts[cp]) await save($, c, run.id, r => ({ ...r, receipts: { ...r.receipts, [cp]: undefined } }))
+      const fingerprint = await sha256(text)
+      // Codex runs in the session's directory, which may be a subdirectory; the diffs are relative to the top level.
+      const paths = cp === 'diff' ? `\n\nPaths in the diffs are relative to ${c.top}; give each finding's file as an absolute path.` : ''
+      const started = await $.tool.call({
+        tool: REVIEW_START,
+        reviewer: 'codex',
+        mode: MODE[cp],
+        question: input.question,
+        instructions: `${input.instructions}${paths}\n\n${READY_LINE}`,
+        artifact: { text, files: input.files ?? [] },
+      })
+      if ('deny' in started && started.deny !== undefined) throw new Error(`review_start refused: ${started.deny}`)
+      const runId = (JSON.parse(String(started.result)) as { runId: string }).runId
+      if ((await loadRun($, c))?.id !== run.id) throw new Error('The build run was restarted while this review started; its round is not recorded.')
+      await update($, rounds, all => {
+        const prior = all[cp]
+        const reviews = prior?.build === run.id ? [...prior.reviews, runId] : [runId]
+        return { ...all, [cp]: { build: run.id, reviews, artifact, fingerprint } }
+      })
+      return { result: JSON.stringify({ runId, checkpoint: cp, note: 'The review arrives as a notification; read it with review_results and record each finding with review_record.' }) }
     }),
   )
 
