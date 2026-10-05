@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Checkpoint } from '../types'
-import { ABSOLUTE, CHECKPOINTS, MODE, READY_LINE, UPSTREAM, describe, drift, section, sha256 } from './receipts'
-import type { BuildRun, ReviewerRun, Validity } from './receipts'
+import { ABSOLUTE, CHECKPOINTS, MODE, READY_LINE, UPSTREAM, convergenceRefusal, describe, drift, section, sha256, snapshot } from './receipts'
+import type { BuildRun, Receipt, ReviewerRun, Validity } from './receipts'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
 // functions declared here, never across an import. receipts.ts holds the pure parts.
@@ -154,6 +154,15 @@ async function registerTools($: Engine): Promise<void> {
     },
   })
   await $.tool.register({
+    name: 'build_receipt',
+    description: "Write a checkpoint's receipt once its rounds have converged and nothing changed since the last was sent; refuses with the reason otherwise.",
+    inputSchema: {
+      type: 'object',
+      required: ['checkpoint'],
+      properties: { checkpoint: { enum: ['spec', 'plan', 'diff'] }, userApproved: { type: 'boolean', description: 'spec only: true once the user approved the converged spec' } },
+    },
+  })
+  await $.tool.register({
     name: 'build_status',
     description: "This repository's build run: each checkpoint receipt valid, stale, missing or unverifiable, and this session's review rounds.",
     inputSchema: { type: 'object', properties: {} },
@@ -223,6 +232,33 @@ export const register: Register = on => {
         return { ...all, [cp]: { build: run.id, reviews, artifact, fingerprint } }
       })
       return { result: JSON.stringify({ runId, checkpoint: cp, note: 'The review arrives as a notification; read it with review_results and record each finding with review_record.' }) }
+    }),
+  )
+
+  on('tool.call', { tool: T('build_receipt') }, async ($, e) =>
+    exclusive(async () => {
+      const { checkpoint: cp, userApproved } = e as unknown as { checkpoint: Checkpoint; userApproved?: boolean }
+      if (cp === 'spec' && userApproved !== true) throw new Error('A spec receipt needs userApproved: true, after the user approved the converged spec.')
+      const c = await checkout($)
+      const run = await loadRun($, c)
+      if (!run) throw new Error(`No build run in ${c.top}; call build_start first.`)
+      const r = (await read($, rounds))[cp]
+      if (!r || r.build !== run.id) throw new Error(`Checkpoint ${cp} has no rounds in this session for this build run.`)
+      const live = await liveRuns($)
+      const up = UPSTREAM[cp]
+      if (up !== null) {
+        const u = await checked($, c, run, up, live)
+        if (u.state !== 'valid') throw new Error(`The ${up} receipt is ${describe(u)}.`)
+      }
+      const refusal = convergenceRefusal(live, r.reviews)
+      if (refusal) throw new Error(`Not converged: ${refusal}.`)
+      if ((await sha256(await material($, c, run, cp, r.artifact))) !== r.fingerprint) {
+        throw new Error('What this checkpoint certifies changed after its last round was sent; start another round.')
+      }
+      const reviewed = r.reviews.map(id => live.find(x => x.id === id)).filter((x): x is ReviewerRun => x !== undefined)
+      const receipt: Receipt = { artifact: r.artifact, dir: cp === 'diff' ? c.top : null, fingerprint: r.fingerprint, findings: snapshot(reviewed) }
+      await save($, c, run.id, b => ({ ...b, receipts: { ...b.receipts, [cp]: receipt } }))
+      return { result: JSON.stringify({ checkpoint: cp, receipt: 'written' }) }
     }),
   )
 
