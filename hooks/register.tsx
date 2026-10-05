@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Checkpoint } from '../types'
-import { ABSOLUTE, CHECKPOINTS, MODE, READY_LINE, UPSTREAM, convergenceRefusal, describe, drift, section, sha256, snapshot } from './receipts'
+import { ABSOLUTE, CHECKPOINTS, GATED, MODE, READY_LINE, UPSTREAM, convergenceRefusal, describe, drift, section, sha256, snapshot, stopNote } from './receipts'
 import type { BuildRun, Receipt, ReviewerRun, Validity } from './receipts'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
@@ -14,6 +14,7 @@ type Answer = { result: string } | { deny: string }
 
 const T = <N extends string>(name: N) => `mcp__orchestrated-build-flow__${name}` as const
 const REVIEW_START = 'mcp__third-party-reviewers__review_start'
+const ORCHESTRATOR = 'orchestrated-build-flow:orchestrated-build-flow'
 const DIFF = ['--binary', '--no-textconv', '--no-ext-diff']
 
 const armed = atom({ plugin: 'orchestrated-build-flow', key: 'armed' } as const, false)
@@ -132,6 +133,24 @@ async function checked($: Engine, c: Checkout, run: BuildRun, checkpoint: Checkp
   return validity($, c, run, checkpoint, live).catch((err: unknown): Validity => ({ state: 'unverifiable', reason: message(err) }))
 }
 
+// The stop note for a hand-off whose receipt does not hold, or null when it holds.
+async function gateNote($: Engine, cp: Checkpoint): Promise<string | null> {
+  if (busy) return stopNote(cp, { state: 'unverifiable', reason: 'a build tool is running' }, 'this session')
+  busy = true
+  let where = 'this session'
+  try {
+    const c = await checkout($)
+    where = c.top
+    const run = await loadRun($, c)
+    const v: Validity = run ? await validity($, c, run, cp, await liveRuns($)) : { state: 'missing' }
+    return v.state === 'valid' ? null : stopNote(cp, v, where)
+  } catch (err) {
+    return stopNote(cp, { state: 'unverifiable', reason: message(err) }, where)
+  } finally {
+    busy = false
+  }
+}
+
 async function registerTools($: Engine): Promise<void> {
   await $.tool.register({
     name: 'build_start',
@@ -182,8 +201,24 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('skill.prompt', async ($, e, next) => {
+    // `skill.prompt` carries the plugin-qualified name.
+    if (e.skill === ORCHESTRATOR) {
+      await update($, armed, () => true)
+      return next(e)
+    }
+    // Own keys only: `constructor` and its kin are inherited, never gated.
+    const cp = Object.hasOwn(GATED, e.skill) ? GATED[e.skill] : undefined
+    if (cp === undefined || !(await read($, armed))) return next(e)
+    const note = await gateNote($, cp)
+    if (note === null) return next(e)
+    const loaded = await next(e)
+    return { text: `${note}\n\n${loaded.text}` }
+  })
+
   on('tool.call', { tool: T('build_start') }, async ($, e) =>
     exclusive(async () => {
+      await update($, armed, () => true)
       const { base } = e as unknown as { base: string }
       const c = await checkout($)
       const commit = await git($, c.top, ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`]).catch(() => {
@@ -197,6 +232,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: T('build_review') }, async ($, e) =>
     exclusive(async () => {
+      await update($, armed, () => true)
       const input = e as unknown as { checkpoint: Checkpoint; artifact?: string; question: string; instructions: string; files?: string[] }
       const cp = input.checkpoint
       const c = await checkout($)
@@ -237,6 +273,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: T('build_receipt') }, async ($, e) =>
     exclusive(async () => {
+      await update($, armed, () => true)
       const { checkpoint: cp, userApproved } = e as unknown as { checkpoint: Checkpoint; userApproved?: boolean }
       if (cp === 'spec' && userApproved !== true) throw new Error('A spec receipt needs userApproved: true, after the user approved the converged spec.')
       const c = await checkout($)
@@ -264,6 +301,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: T('build_status') }, async $ => {
     try {
+      await update($, armed, () => true)
       const c = await checkout($)
       const run = await loadRun($, c)
       if (!run) return { result: JSON.stringify({ checkout: c.top, run: null }) }
