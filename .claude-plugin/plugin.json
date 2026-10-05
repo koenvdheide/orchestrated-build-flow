@@ -9,6 +9,7 @@
   "homepage": "https://github.com/koenvdheide/orchestrated-build-flow",
   "repository": "https://github.com/koenvdheide/orchestrated-build-flow",
   "license": "MIT",
+  "types": "./types/index.d.ts",
   "keywords": ["workflow", "orchestration", "planning", "codex", "superpowers"],
   "dependencies": ["third-party-reviewers"]
 }
