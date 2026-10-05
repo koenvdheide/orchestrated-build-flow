@@ -11,11 +11,11 @@ One orchestrator owns the whole superpowers pipeline (prior-art grounding → br
 
 **Invocation:** a heavyweight coordinator for non-trivial build work — invoke it explicitly, or wire it as your default for build work via your planning preferences (e.g. a CLAUDE.md rule). For design-only or exploratory work, use `superpowers-extended-cc:brainstorming` instead.
 
-Core principle: this skill **cannot prevent** a sub-skill from handing off to the next phase. Skill loading has no call/return stack, so a loaded child's terminal HARD-GATE can still fire — "the user invoked the orchestrator" is a rationale, not an enforcement boundary. So it does not claim prevention. A skip is caught at the next orchestrator check, by a durable receipt the checkpoint wrote. Without receipts, a resuming agent guesses from weak evidence (grep for 'codex', git-log, file mtimes, "re-review everything"); the receipt replaces the guess.
+This plugin's tools keep the checkpoints in code. `build_review` starts each round of a checkpoint's review and sends Codex exactly the material the receipt will certify; `build_receipt` writes the receipt once the rounds have converged and nothing changed since the last was sent; `build_status` reports each receipt as valid, stale, missing or unverifiable. While this skill is loaded, a sub-skill that would hand off past a checkpoint whose receipt does not hold opens with a stop note naming that checkpoint. Run the checkpoint; go past the note only when the user has explicitly chosen to skip it.
 
 Announce at start: that you are coordinating the full flow and that each checkpoint is receipt-gated.
 
-Never treat an artifact's *presence* as proof its checkpoint ran. Presence cannot distinguish drafted from converged from already-used-downstream. Only a matching receipt proves it.
+Never treat an artifact's *presence* as proof its checkpoint ran. Only a valid receipt proves it.
 
 ## The pipeline
 
@@ -23,92 +23,31 @@ One table owns the phase order, the hand-off intercepts, the checkpoint modes an
 
 | Phase | What happens | Entry requires |
 | --- | --- | --- |
-| **0 Preflight** | Two reachability checks NOW, before brainstorming: (1) the `third-party-reviewers` review tool offers Codex: `review_start` is available and its `reviewer` accepts `codex`; (2) the required `superpowers-extended-cc` skills are available — `brainstorming`, `writing-plans`, `subagent-driven-development`, `finishing-a-development-branch`. If any is missing, STOP and name it as an unmet prerequisite rather than failing mid-flow. Then initialise or load the state file; if one already exists, reconcile resume-vs-start-over with the user. In superpowers the design *is* the spec (one artifact), so there are exactly three Codex loops. | — |
+| **0 Preflight** | Reachability NOW, before brainstorming: (1) `build_start`, `build_review`, `build_receipt` and `build_status` are available (they come with this plugin's mod; missing means mods are off or Claude Code is older than v2.1.287), and third-party-reviewers' `review_start` accepts `codex`; (2) the required `superpowers-extended-cc` skills are available — `brainstorming`, `writing-plans`, `subagent-driven-development`, `finishing-a-development-branch`. If any is missing, STOP and name it as an unmet prerequisite rather than failing mid-flow. Then call `build_status`: if this repository has a run, reconcile resume-vs-start-over with the user; for a new run or a start-over, call `build_start` with the base branch. In superpowers the design *is* the spec (one artifact), so there are exactly three Codex loops. | — |
 | **1 Prior art** | Ground the design in what exists. **Lightweight scan** — a few targeted searches across the sources that fit the domain: web posts (WebSearch), existing implementations (GitHub), library docs (Context7), academic literature (the lit-search MCPs, Consensus) where the topic warrants. Synthesise a short **Prior-art brief**: closest prior work, what to borrow, how this should differ. Write it into the spec as a `Prior art` section so it grounds both brainstorming and the spec red-team. Escalate to `deep-research` only when the space is rich or unfamiliar, or the user asks. **Privacy gate:** the scan can send the idea and repo context to external services, so unless the work is clearly public or non-sensitive, confirm before any networked search and always honour an opt-out (skip the external scan, rely on local knowledge). Skippable with a stated reason, never silently. | — |
 | **2 Brainstorm** | Invoke brainstorming from the Prior-art brief. Its hand-off to writing-plans is the trigger for checkpoint 1: run that first. | — |
-| **3 Checkpoint: spec** | `red-team` convergence loop on the spec. On convergence, present the converged spec for a **single user approval**. This approval replaces routing through brainstorming's own user-review gate — do not also run that gate. Write the spec receipt with `userApproved: true`. | brainstorming reported a spec it considers finished |
-| **4 Plan** | Invoke writing-plans. Its execution-method question is the trigger for checkpoint 2: run that first. | valid spec receipt with `userApproved: true` |
-| **5 Checkpoint: plan** | `plan-review` convergence loop on the plan, spec supplied as reference for alignment. Write the plan receipt, recording the spec hash supplied to the converged round. | writing-plans reported a plan it considers finished |
-| **6 Execute (SDD)** | Pin SDD: skip writing-plans' execution-method question (no parallel-session offer, no manual execution). Worktree handling is inherited from using-git-worktrees / SDD; do not re-invent it. | valid plan receipt |
-| **7 Checkpoint: diff** | `diff-review` convergence loop on the change surface, plan supplied as reference for alignment so the receipt's `upstreamHash` records a plan the reviewer actually saw. Supplements SDD's own final reviewer; does not replace it. Write the diff receipt. | SDD reported its tasks complete **and** its final reviewer ran. Without that, re-enter phase 6 rather than reviewing partial work |
-| **8 Finish** | `finishing-a-development-branch` for the merge, PR and cleanup decision. Stop before any public publish step — the final click is the user's. | valid diff receipt |
+| **3 Checkpoint 1: spec** | Convergence loop with `build_review` checkpoint `spec`, artifact the spec. On convergence, present the converged spec for a **single user approval**. This approval replaces routing through brainstorming's own user-review gate — do not also run that gate. Then `build_receipt` with `userApproved: true`. | brainstorming reported a spec it considers finished |
+| **4 Plan** | Invoke writing-plans. Its execution-method question is the trigger for checkpoint 2: run that first. | `build_status`: spec receipt valid |
+| **5 Checkpoint 2: plan** | Convergence loop with `build_review` checkpoint `plan`, artifact the plan; the spec goes with it. Then `build_receipt`. | writing-plans reported a plan it considers finished |
+| **6 Execute (SDD)** | Pin SDD: skip writing-plans' execution-method question (no parallel-session offer, no manual execution). Worktree handling is inherited from using-git-worktrees / SDD; do not re-invent it. | `build_status`: plan receipt valid |
+| **7 Checkpoint 3: diff** | Convergence loop with `build_review` checkpoint `diff`: the tool collects the change surface (commits since the base, staged and unstaged changes, untracked files) in the current checkout, with the plan. Supplements SDD's own final reviewer; does not replace it. Then `build_receipt`. | SDD reported its tasks complete **and** its final reviewer ran. Without that, re-enter phase 6 rather than reviewing partial work |
+| **8 Finish** | `finishing-a-development-branch` for the merge, PR and cleanup decision. Stop before any public publish step — the final click is the user's. | `build_status`: diff receipt valid |
 
 **Execution depth scales to the work.** Phase 6 always runs *through* a subagent. What scales is the review depth on top: a multi-task or non-trivial plan gets SDD's full per-task cycle (implementer → spec reviewer → quality reviewer); a genuinely trivial single-task plan can run one implementer and lean on checkpoint 3. The three Codex checkpoints never scale away.
 
-## Receipt gating
+## Checkpoints
 
-Before entering a phase whose `Entry requires` column names a receipt, read the state file and assert that receipt **and every receipt before it in the pipeline**:
-
-1. it exists, AND
-2. what it recorded about its artifact still matches the current state — a file hash for the spec and plan, every recorded part for the change surface, AND
-3. `userApproved` is true where the column says so, AND
-4. for a downstream receipt, its `upstreamHash` matches the **current** hash of the upstream artifact.
-
-A failed assertion sends you back to run that checkpoint. Assertion 4 is what makes an upstream edit bite: change the spec after the plan was reviewed and the plan receipt stops validating, so checkpoint 2 re-runs. Validating the whole chain is what stops that edit slipping through later — phase 8 names only the diff receipt, and the diff surface does not contain the spec, so a spec edit is invisible there unless the plan receipt is checked too. There is no separate stale flag; invalidity is derived from the hashes, so there is no second representation to keep in sync.
-
-**Before running any checkpoint, establish that its producer phase finished** — the `Entry requires` column says what counts. Receipts record that a review happened, not that the work under review was complete, so a dropped session can leave a half-written artifact that satisfies every gate below it. When you cannot establish completion, re-enter the producer phase instead of reviewing its output.
-
-## Convergence loop
-
-Mechanics (round shape, gates, across-round prompt construction, the `Previously identified findings:` block, drift detection) live in the `third-party-reviewers:codex` skill's **Convergence Mode (iterative review)** section. Do not restate them here. This section pins only what the orchestrator adds:
-
-- **Findings ledger.** The orchestrator keeps its own ledger so a resumed session knows what was decided: each finding carries `id`, `title`, `severity` (breakage / simplification — for `plan-review` and `diff-review`, read breakage as correctness or safety, simplification as over-engineering or redundancy) and `status`, one of **`unresolved`**, **`applied`** (fix made and re-verified) or **`rejected`** (not acted on: the evidence contradicts it, or the user decided against it, with the reason recorded). Those are the statuses `review_record` records and the codex skill's `Previously identified findings:` block repeats, so they go straight across with no translation. There is no silent "deferred": a finding the user postpones stays `unresolved`, or becomes `rejected` with their reason if they drop it from this brief. The plugin's record lasts only for the session, so the ledger is yours to keep across a resume.
-- **Apply gate, overriding the codex skill's per-round question.** Where the codex skill asks the user which fixes to apply each round, the orchestrator decides by class instead: a **clear win** (correctness or quality fix, no scope or behaviour change) is applied automatically. Anything that changes scope or behaviour — including a simplification that drops or merges functionality — is a **tradeoff**: pause and surface it to the user as an inline question. Never auto-apply a tradeoff. The user's overrule from the findings pane outranks this gate.
-- **Convergence, for receipt purposes,** also requires no finding left `unresolved` in the ledger. The verdict and drift conditions are the dependency's.
-
-**Fix routing for checkpoint 3.** A non-trivial finding gets a fresh fix-subagent with a narrow patch brief and required validation, consistent with SDD's "don't fix manually". Only a trivial finding (a one-word doc typo) is applied directly and re-verified; a subagent for a one-liner is ceremony.
-
-## Change surface
-
-Checkpoint 3 reviews the whole surface, not just `git diff <base>...HEAD`. Supply the reviewer `git log <base>..HEAD`, both `git diff --cached <base>` (the index against the base) and `git diff` (the working tree against the index), and the contents of every path `git status --porcelain -uall` reports as untracked. Two diffs, because git has three states: a single working-tree-against-base diff hides anything staged and then reverted in the worktree, which could be committed unreviewed. Deletions appear as diff text, so no step needs the bytes of a file that no longer exists. Use `-uall`: plain `--porcelain` collapses an untracked directory into one entry, so its files would never be enumerated. Checkpoint 3 requires a git repository; git is already a prerequisite and phase 6 inherits worktree handling, so there is no second scheme for non-repo work.
-
-**Exclude the run state file and anything else under `docs/superpowers/` from the surface.** It is run metadata, it sits in the untracked set, and the diff receipt is written into it — so including it would mean every receipt invalidating itself the moment it was saved.
-
-**The diff receipt records four parts:** `head` (`git rev-parse HEAD`), `stagedDiffHash` and `worktreeDiffHash` (SHA-256 over the two diffs above), and `untracked` (each untracked path with its own `sha256sum`, excluded paths omitted). Pass `--no-textconv --no-ext-diff` on both recorded diffs: a textconv filter can render different bytes as identical text, so an edit would change no part. Resume re-runs all four and compares them part-wise.
-
-The receipt stores parts because it only has to answer whether the surface moved, which a comparison settles without a canonical fingerprint. Comparing parts means there is no concatenation order and no sort stability for a later session to get wrong, and each part catches a distinct kind of drift: a commit moves `head`, staging moves `stagedDiffHash`, an edit to an already-modified file moves `worktreeDiffHash`, and a new or removed untracked file moves `untracked`. Reproducibility stays git's problem.
-
-Spec and plan hashes are SHA-256 over the raw file bytes.
-
-## State file
-
-Single JSON for the active run at `docs/superpowers/orchestrator-state.json`. One active run at a time, one receipt per checkpoint. A receipt records the artifact path, its hash (or for checkpoint 3 the recorded surface parts), the Codex mode, rounds run, the final verdict, the findings ledger, user decisions, `userApproved` where the pipeline table requires it, and on a downstream receipt `upstreamHash` — the hash of the upstream artifact supplied to the round that converged.
-
-```json
-{
-  "run": "2026-06-02-export-csv",
-  "base": "main",
-  "checkpoints": {
-    "spec": {
-      "artifact": "docs/superpowers/specs/2026-06-02-export-csv-design.md",
-      "artifactHash": "sha256:9f3a…",
-      "mode": "red-team",
-      "rounds": 2,
-      "verdict": "no redesign-class problem",
-      "findings": [
-        {"id": "B1", "title": "missing idempotency guard on retry", "severity": "breakage", "status": "applied"},
-        {"id": "S1", "title": "drop the separate audit-log table", "severity": "simplification", "status": "rejected"}
-      ],
-      "userDecisions": {"S1": "keep — needed for the audit log"},
-      "userApproved": true
-    },
-    "plan": {
-      "artifact": "docs/superpowers/plans/2026-06-02-export-csv.md",
-      "artifactHash": "sha256:1c70…",
-      "upstreamHash": "sha256:9f3a…",
-      "mode": "plan-review",
-      "rounds": 1,
-      "verdict": "READY TO EXECUTE",
-      "findings": []
-    }
-  }
-}
-```
+- Each checkpoint is a convergence loop the user asked for: run it as the `third-party-reviewers:codex` skill's **Convergence Mode** describes, starting every round with `build_review` instead of `review_start`, with the same question and instructions (the `Previously identified findings:` block from round 2 on). `build_review` sets the mode, sends the material and asks for a verdict that begins `READY` or `NOT READY`.
+- Record every finding with `review_record` as that skill says. The receipt snapshots what you recorded, so there is no separate ledger.
+- When a round comes back READY with nothing open, call `build_receipt`. A refusal names what is missing — an open finding, an overrule not yet acted on, a change since the last round was sent, an upstream receipt that no longer holds. Fix it and run another round, or call it again.
+- **Before running any checkpoint, establish that its producer phase finished** — the `Entry requires` column says what counts. A receipt records that a review happened, not that the work under review was complete, so a dropped session can leave a half-written artifact. When you cannot establish completion, re-enter the producer phase instead of reviewing its output.
+- **Fix routing for checkpoint 3.** A non-trivial finding gets a fresh fix-subagent with a narrow patch brief and required validation, consistent with SDD's "don't fix manually". Only a trivial finding (a one-word doc typo) is applied directly and re-verified; a subagent for a one-liner is ceremony.
+- Work from inside the build's repository: the tools and the gate use the git checkout of the session's current directory; `build_status` and the stop note name the checkout they checked.
 
 ## Failure & resume
 
-- **Codex unavailable** (`review_start` missing or refusing Codex, or a run that comes back `failed`: 429, timeout, auth) → STOP and ask the user before proceeding unreviewed. **No Gemini fallback.** This is why phase 0 preflights reachability, rather than failing three phases in.
+- **Codex unavailable** (`build_review` refused by `review_start`, or a round that comes back `failed`: 429, timeout, auth) → STOP and ask the user before proceeding unreviewed. **No Gemini fallback.** This is why phase 0 preflights reachability, rather than failing three phases in.
 - **Superpowers skills missing** → caught at preflight. STOP and name the missing prerequisite.
-- **Skipped checkpoint** → caught at the next phase whose entry names its receipt. Go back and run it; if a downstream artifact was already built, its `upstreamHash` stops matching and that checkpoint re-runs too.
-- **Resume off the state file, not artifact presence.** Resume at the first phase whose entry assertion fails, then establish that phase's producer finished before running its checkpoint.
-- **Fresh invocation finding an existing state file** → ask the user resume-vs-start-over. Do not blindly continue, and do not blindly wipe it.
+- **Skipped checkpoint** → the gate's stop note, or `build_status`, names it. Go back and run it.
+- **Resume off `build_status`, not artifact presence.** Resume at the first receipt that is not valid, then establish that phase's producer finished before running its checkpoint. Receipts outlive the session; rounds do not, so a session that ended mid-checkpoint starts that checkpoint's loop again.
+- **Fresh invocation finding an existing run** → ask the user resume-vs-start-over. Do not blindly continue, and do not blindly start over; `build_start` is the start-over.
