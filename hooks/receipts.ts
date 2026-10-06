@@ -71,7 +71,6 @@ export function convergenceRefusal(runs: readonly ReviewerRun[], ids: readonly s
     if (f.status === 'unresolved') return `finding ${f.id} is unresolved`
     if (f.overrule === 'apply' && f.status !== 'applied') return `the user asked for finding ${f.id} to be applied; record it applied once the fix is made`
     if (f.overrule === 'reject' && f.status !== 'rejected') return `the user rejected finding ${f.id}; undo any fix and record it rejected`
-    if (f.file !== null && !ABSOLUTE.test(f.file)) return `finding ${f.id} cites a relative path; update third-party-reviewers to 0.3.1 or later`
   }
   return null
 }

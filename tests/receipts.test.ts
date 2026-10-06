@@ -29,7 +29,6 @@ describe('convergenceRefusal', () => {
     expect(convergenceRefusal([run('r1', { findings: [f('r1.1', { status: 'unresolved' })] })], ['r1'])).toBe('finding r1.1 is unresolved')
     expect(convergenceRefusal([run('r1', { findings: [f('r1.1', { status: 'rejected', overrule: 'apply' })] })], ['r1'])).toBe('the user asked for finding r1.1 to be applied; record it applied once the fix is made')
     expect(convergenceRefusal([run('r1', { findings: [f('r1.1', { status: 'applied', overrule: 'reject' })] })], ['r1'])).toBe('the user rejected finding r1.1; undo any fix and record it rejected')
-    expect(convergenceRefusal([run('r1', { findings: [f('r1.1', { file: 'a.ts' })] })], ['r1'])).toBe('finding r1.1 cites a relative path; update third-party-reviewers to 0.3.1 or later')
   })
   test('findings of an earlier complete round still count', () => {
     expect(convergenceRefusal([run('r1', { findings: [f('r1.1', { status: 'unresolved' })] }), run('r2')], ['r1', 'r2'])).toBe('finding r1.1 is unresolved')

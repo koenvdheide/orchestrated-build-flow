@@ -46,10 +46,9 @@ describe('build_status', () => {
 })
 
 describe('build_review', () => {
-  test('sends codex the mode, the READY line and the captured material, and records the round', async ($, on) => {
+  test('sends codex the mode, the READY line and the captured material, records the round, and returns the review', async ($, on) => {
     const w = await started($, on)
-    const { runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I', files: ['C:/repo/a.ts'] })
-    expect(runId).toBe('r-1')
+    expect(await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I', files: ['C:/repo/a.ts'] })).toEqual({ id: 'r-1', status: 'running', verdict: null, findings: [] })
     const sent = w.reviews[0] as any
     expect(sent.reviewer).toBe('codex')
     expect(sent.mode).toBe('red-team')
@@ -88,7 +87,7 @@ describe('build_review', () => {
     // Another session restarts the run.
     w.store.set(`run:${KEY}`, { ...(w.store.get(`run:${KEY}`) as any), id: 'other' })
     w.held[0]?.()
-    expect((await pending).deny).toBe('The build run was restarted while this review started; its round is not recorded.')
+    expect((await pending).deny).toBe('The build run was restarted while this review ran; its round is not recorded.')
     expect((await resultOf($, 'build_status')).rounds).toEqual({})
   })
 })
@@ -96,7 +95,7 @@ describe('build_review', () => {
 describe('build_receipt', () => {
   test('writes a receipt with the findings snapshot', async ($, on) => {
     const w = await started($, on)
-    const { runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    const { id: runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
     finish(w, runId, 'READY', [finding('r-1.1', { file: 'C:/repo/a.ts' })])
     expect(await resultOf($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).toEqual({ checkpoint: 'spec', receipt: 'written' })
     const receipt = (w.store.get(`run:${KEY}`) as any).receipts.spec
@@ -118,8 +117,6 @@ describe('build_receipt', () => {
     expect((await receipt()).deny).toBe("Not converged: the last review's verdict does not begin with READY: NOT READY: two gaps.")
     finish(w, 'r-1', 'READY', [finding('r-1.1', { status: 'unresolved' })])
     expect((await receipt()).deny).toBe('Not converged: finding r-1.1 is unresolved.')
-    finish(w, 'r-1', 'READY', [finding('r-1.1', { file: 'a.ts' })])
-    expect((await receipt()).deny).toBe('Not converged: finding r-1.1 cites a relative path; update third-party-reviewers to 0.3.1 or later.')
     finish(w, 'r-1', 'READY')
     w.files.set(SPEC, 'spec v2')
     expect((await receipt()).deny).toBe('What this checkpoint certifies changed after its last round was sent; start another round.')
@@ -293,7 +290,7 @@ describe('validity', () => {
     const w = await started($, on)
     await converge($, w, 'spec')
     await converge($, w, 'plan')
-    const { runId } = await resultOf($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })
+    const { id: runId } = await resultOf($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })
     finish(w, runId, 'READY')
     w.git.set(GIT.top, { stdout: 'C:/repo-wt\n' })
     expect((await call($, 'build_receipt', { checkpoint: 'diff' })).deny).toBe('What this checkpoint certifies changed after its last round was sent; start another round.')
@@ -320,7 +317,7 @@ describe('validity', () => {
 
   test('a new round holds the later receipts, and an unchanged reissue restores them', async ($, on) => {
     const w = await chain($, on)
-    const { runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    const { id: runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
     expect((await resultOf($, 'build_status')).receipts).toEqual({ spec: 'missing', plan: 'stale: the spec receipt is missing', diff: 'stale: the plan receipt is stale: the spec receipt is missing' })
     finish(w, runId, 'READY')
     await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })

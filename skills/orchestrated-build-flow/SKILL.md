@@ -11,7 +11,7 @@ One orchestrator owns the whole superpowers pipeline (prior-art grounding → br
 
 **Invocation:** a heavyweight coordinator for non-trivial build work — invoke it explicitly, or wire it as your default for build work via your planning preferences (e.g. a CLAUDE.md rule). For design-only or exploratory work, use `superpowers-extended-cc:brainstorming` instead.
 
-This plugin's tools keep the checkpoints in code. `build_review` starts each round of a checkpoint's review and sends Codex exactly the material the receipt will certify; `build_receipt` writes the receipt once the rounds have converged and nothing changed since the last was sent; `build_status` reports each receipt as valid, stale, missing or unverifiable. While this skill is loaded, a sub-skill that would hand off past a checkpoint whose receipt does not hold opens with a stop note naming that checkpoint. Run the checkpoint; go past the note only when the user has explicitly chosen to skip it.
+This plugin's tools keep the checkpoints in code. `build_review` runs each round of a checkpoint's review and sends Codex exactly the material the receipt will certify; `build_receipt` writes the receipt once the rounds have converged and nothing changed since the last was sent; `build_status` reports each receipt as valid, stale, missing or unverifiable. While this skill is loaded, a sub-skill that would hand off past a checkpoint whose receipt does not hold opens with a stop note naming that checkpoint. Run the checkpoint; go past the note only when the user has explicitly chosen to skip it.
 
 Announce at start: that you are coordinating the full flow and that each checkpoint is receipt-gated.
 

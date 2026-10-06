@@ -101,8 +101,9 @@ export function world(on: On) {
     w.reviews.push(e)
     if (w.holdStart) await new Promise<void>(resolve => w.held.push(resolve))
     const id = `r-${w.reviews.length}`
-    w.setRuns([...w.runs(), { id, status: 'running', verdict: null, findings: [] }])
-    return { result: JSON.stringify({ runId: id }) }
+    const row = { id, status: 'running', verdict: null, findings: [] }
+    w.setRuns([...w.runs(), row])
+    return { result: JSON.stringify(row) }
   })
   on('tool.register', ($, e) => ({ value: { tool: T(e.name) } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -136,7 +137,7 @@ export function finish(w: World, id: string, verdict: string, findings: unknown[
 // One READY round and its receipt for `checkpoint`.
 export async function converge($: any, w: World, checkpoint: 'spec' | 'plan' | 'diff') {
   const artifact = checkpoint === 'spec' ? SPEC : checkpoint === 'plan' ? PLAN : undefined
-  const { runId } = await resultOf($, 'build_review', { checkpoint, artifact, question: 'Q', instructions: 'I' })
+  const { id: runId } = await resultOf($, 'build_review', { checkpoint, artifact, question: 'Q', instructions: 'I' })
   finish(w, runId, 'READY')
   return call($, 'build_receipt', { checkpoint, ...(checkpoint === 'spec' ? { userApproved: true } : {}) })
 }

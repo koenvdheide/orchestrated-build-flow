@@ -159,7 +159,7 @@ async function registerTools($: Engine): Promise<void> {
   })
   await $.tool.register({
     name: 'build_review',
-    description: "Start one round of a checkpoint's Codex review (spec, plan or diff) through third-party-reviewers. Sends Codex exactly the material the receipt will certify and records the round. Follow the orchestrated-build-flow skill.",
+    description: "Run one round of a checkpoint's Codex review (spec, plan or diff) through third-party-reviewers and return the review. Sends Codex exactly the material the receipt will certify and records the round. Follow the orchestrated-build-flow skill.",
     inputSchema: {
       type: 'object',
       required: ['checkpoint', 'question', 'instructions'],
@@ -260,14 +260,14 @@ export const register: Register = on => {
         artifact: { text, files: input.files ?? [] },
       })
       if ('deny' in started && started.deny !== undefined) throw new Error(`review_start refused: ${started.deny}`)
-      const runId = (JSON.parse(String(started.result)) as { runId: string }).runId
-      if ((await loadRun($, c))?.id !== run.id) throw new Error('The build run was restarted while this review started; its round is not recorded.')
+      const { id } = JSON.parse(String(started.result)) as { id: string }
+      if ((await loadRun($, c))?.id !== run.id) throw new Error('The build run was restarted while this review ran; its round is not recorded.')
       await update($, rounds, all => {
         const prior = all[cp]
-        const reviews = prior?.build === run.id ? [...prior.reviews, runId] : [runId]
+        const reviews = prior?.build === run.id ? [...prior.reviews, id] : [id]
         return { ...all, [cp]: { build: run.id, reviews, artifact, fingerprint } }
       })
-      return { result: JSON.stringify({ runId, checkpoint: cp, note: 'The review arrives as a notification; read it with review_results and record each finding with review_record.' }) }
+      return { result: String(started.result) }
     }),
   )
 
