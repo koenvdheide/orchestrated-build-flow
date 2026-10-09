@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { READY_LINE } from '../hooks/receipts'
+import { READY_LINE, stopNote } from '../hooks/receipts'
 import { BASE, GIT, KEY, PLAN, SPEC, TOP, boot, call, converge, finding, finish, resultOf, started, world } from './world'
 
 describe('build_start', () => {
@@ -337,5 +337,70 @@ describe('validity', () => {
     finish(w, 'r-1', 'READY')
     await call($, 'build_start', { base: 'main' })
     expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Checkpoint spec has no rounds in this session for this build run.')
+  })
+  test('rounds and the armed gate come back when the conversation is resumed, and only then', async ($, on) => {
+    const w = await started($, on)
+    const plans = async () => (await $.skill.prompt({ skill: 'superpowers-extended-cc:writing-plans', text: 'original' })).text
+    await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    finish(w, 'r-1', 'READY')
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's2'
+    expect(await plans()).toBe('original')
+    expect((await resultOf($, 'build_status')).rounds).toEqual({})
+    await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
+    w.sessionId = 's1'
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    expect(await plans()).toBe(`${stopNote('spec', { state: 'missing' }, TOP)}\n\noriginal`)
+    // Compaction keeps the conversation, so the store is not read back.
+    w.store.delete('rounds:s1')
+    await $.classic.SessionStart({ source: 'compact', session_id: 's1' })
+    expect(await resultOf($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).toEqual({ checkpoint: 'spec', receipt: 'written' })
+  })
+
+  test('a snapshot that cannot be saved is named in a toast and the tool still answers', async ($, on) => {
+    const w = await started($, on)
+    w.failStore = true
+    expect((await resultOf($, 'build_status')).checkout).toBe(TOP)
+    expect(w.toasts.some(t => t.startsWith('Could not save the build state'))).toBe(true)
+  })
+
+  test('session start drops the least recently saved conversations past the budget, both keys together, never the current one or a run', async ($, on) => {
+    const w = world(on)
+    const MiB = 1024 * 1024
+    // Two UTF-8 bytes a character, so a budget counted in characters would keep them all.
+    const saved = (savedAt: number, size: number) => ({ savedAt, rounds: { spec: { build: 'b', reviews: [], artifact: 'é'.repeat(size / 2), fingerprint: 'f' } } })
+    w.store.set(`run:${KEY}`, { id: 'run', base: BASE, receipts: {} })
+    w.store.set('rounds:s1', saved(0, 0.5 * MiB))
+    // Ranked by each key alone, b would stay and a's armed and c's rounds would go.
+    w.store.set('armed:a', { savedAt: 1 })
+    w.store.set('rounds:a', saved(5, 0.5 * MiB))
+    w.store.set('armed:b', { savedAt: 4 })
+    w.store.set('rounds:b', saved(4, 0.5 * MiB))
+    w.store.set('armed:c', { savedAt: 6 })
+    w.store.set('rounds:c', saved(2, 0.75 * MiB))
+    w.store.set('armed:d', { savedAt: 0.5 })
+    await boot($, w)
+    expect([...w.store.keys()].sort()).toEqual(['armed:a', 'armed:c', 'rounds:a', 'rounds:c', 'rounds:s1', `run:${KEY}`])
+  })
+
+  test('a round history holding a review third-party-reviewers no longer has starts over', async ($, on) => {
+    const w = await started($, on)
+    await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    w.setRuns([])
+    await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    finish(w, 'r-2', 'READY')
+    expect(await resultOf($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).toEqual({ checkpoint: 'spec', receipt: 'written' })
+  })
+
+  test('a review that returns after its conversation ended records no round', async ($, on) => {
+    const w = await started($, on)
+    w.holdStart = true
+    const pending = call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    await w.clock.settle()
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's2'
+    w.held[0]?.()
+    await pending
+    expect((await resultOf($, 'build_status')).rounds).toEqual({})
   })
 })

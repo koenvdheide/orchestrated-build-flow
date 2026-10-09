@@ -6,7 +6,7 @@ A [Claude Code](https://claude.ai/code) plugin that runs a non-trivial build all
 
 One orchestrator owns the whole [superpowers](https://github.com/pcvelz/superpowers) pipeline (prior-art grounding, brainstorm, spec, plan, execute) and inserts three independent Codex convergence checkpoints: the spec (red-team), the plan (plan-review), and the implementation diff (diff-review).
 
-Each checkpoint writes a receipt through the plugin's mod. Codex reviews exactly the material the receipt hashes, and the receipt is written only once the review has converged and nothing changed since. While the flow runs, a superpowers skill that would hand off past a missing or stale receipt opens with a note to run that checkpoint first. Receipts outlive the session, which is what makes the flow resumable: a dropped session continues at the first checkpoint whose receipt no longer holds.
+Each checkpoint writes a receipt through the plugin's mod. Codex reviews exactly the material the receipt hashes, and the receipt is written only once the review has converged and nothing changed since. While the flow runs, a superpowers skill that would hand off past a missing or stale receipt opens with a note to run that checkpoint first. Receipts outlive the session, which is what makes the flow resumable: a dropped session continues at the first checkpoint whose receipt no longer holds. A conversation's review rounds are kept too, so quitting and resuming it keeps a checkpoint's loop; when a session starts, the plugin deletes the least recently saved conversations' rounds beyond the first 2 MiB.
 
 It uses the superpowers sub-skill files unmodified (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch), owning the transitions between them and the Codex gates, and overriding two of their routing questions: brainstorming's user-review gate and writing-plans' execution-method question. The skill documents the mechanics.
 
@@ -17,7 +17,7 @@ The phases, with what each needs before it starts, are in the skill's [pipeline 
 ## Prerequisites
 
 - Claude Code v2.1.287 or later, with mods on.
-- The `third-party-reviewers` plugin, 0.4.0 or later: installed automatically as a dependency from the `agent-tools` marketplace. It runs the [Codex CLI](https://github.com/openai/codex), which must be installed and signed in.
+- The `third-party-reviewers` plugin, 0.4.3 or later: installed automatically as a dependency from the `agent-tools` marketplace. It runs the [Codex CLI](https://github.com/openai/codex), which must be installed and signed in.
 - The `superpowers-extended-cc` skills (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch). Install the plugin that provides them, then reload:
   ```text
   /plugin marketplace add pcvelz/superpowers

@@ -34,6 +34,7 @@ export function world(on: On) {
   const w = {
     clock,
     store,
+    sessionId: 's1',
     cwd: TOP,
     files: new Map<string, string>(),
     // Edit an answer to move the repository: a commit changes `head`, staging `cached`, and so on.
@@ -50,11 +51,15 @@ export function world(on: On) {
     // review_start calls the mod made, and their run ids r-1, r-2, …
     reviews: [] as Record<string, any>[],
     failStore: false,
+    toasts: [] as string[],
     // When set, review_start refuses with this text.
     startDeny: null as string | null,
     // With holdStart, review_start waits here until the test releases it.
     holdStart: false,
     held: [] as (() => void)[],
+    // With holdArm, each write arming the session waits here until the test releases it.
+    holdArm: false,
+    heldArm: [] as (() => void)[],
     runs(): any[] {
       return (state.get('third-party-reviewers/runs')?.value as any[] | undefined) ?? []
     },
@@ -65,6 +70,7 @@ export function world(on: On) {
   const top = () => (w.git.get(GIT.top)?.stdout ?? '').trim()
 
   on('session.cwd', () => ({ value: w.cwd }))
+  on('session.id', () => ({ value: w.sessionId }))
   on('fs.read', ($, e) => {
     const path = e.path.replaceAll('\\', '/')
     return w.files.has(path) ? { value: w.files.get(path) as string } : { deny: `ENOENT: ${e.path}` }
@@ -80,6 +86,15 @@ export function world(on: On) {
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: a.truncated ?? false, isStderrTruncated: false } }
   })
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
+  on('ui.toast', ($, e) => {
+    w.toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
+  on('store.delete', ($, e) => {
+    store.delete(e.key)
+    return { value: undefined }
+  })
   on('store.set', ($, e) => {
     if (w.failStore) return { deny: 'EACCES: the store is not writable' }
     store.set(e.key, JSON.parse(JSON.stringify(e.value)))
@@ -89,7 +104,8 @@ export function world(on: On) {
     const s = state.get(`${e.plugin}/${e.key}`)
     return { value: { value: s?.value, version: s?.version ?? 0 } }
   })
-  on('state.set', ($, e: any) => {
+  on('state.set', async ($, e: any) => {
+    if (w.holdArm && e.key === 'armed' && e.value === true) await new Promise<void>(resolve => w.heldArm.push(resolve))
     const k = `${e.plugin}/${e.key}`
     const current = state.get(k)?.version ?? 0
     if (e.ifVersion !== undefined && e.ifVersion !== current) return { value: { isSet: false, version: current } }
@@ -108,6 +124,7 @@ export function world(on: On) {
   on('tool.register', ($, e) => ({ value: { tool: T(e.name) } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
   on('skill.prompt', ($, e) => ({ text: e.text }))
   return w
 }

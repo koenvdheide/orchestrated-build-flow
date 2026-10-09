@@ -62,6 +62,20 @@ describe('gate', () => {
     await pending
   })
 
+  test('a call that outlives its conversation does not arm the next one', async ($, on) => {
+    const w = world(on)
+    await boot($, w)
+    w.holdArm = true
+    const pending = load($, ORCHESTRATOR)
+    await w.clock.settle()
+    w.holdArm = false
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's2'
+    w.heldArm.forEach(release => release())
+    await pending
+    expect(await load($, sp('writing-plans'))).toBe('original')
+  })
+
   test('other skills pass untouched, and session end disarms', async ($, on) => {
     await started($, on)
     await load($, ORCHESTRATOR)
