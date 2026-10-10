@@ -77,13 +77,14 @@ describe('build_review', () => {
     expect((await resultOf($, 'build_status')).rounds).toEqual({})
   })
 
-  test('a restart while review_start is pending records nothing, and a parallel build tool is refused', async ($, on) => {
+  test('a restart while review_start is pending records nothing, and parallel build tools are refused', async ($, on) => {
     const w = await started($, on)
     w.holdStart = true
     const pending = call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
     // settle() would wait for the held review_start; one step at a time lets it reach the hold.
     for (let i = 0; i < 50 && w.held.length === 0; i++) await w.clock.advance(0)
     expect((await call($, 'build_start', { base: 'main' })).deny).toBe('Another build tool is running; try again when it returns.')
+    expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Another build tool is running; try again when it returns.')
     // Another session restarts the run.
     w.store.set(`run:${KEY}`, { ...(w.store.get(`run:${KEY}`) as any), id: 'other' })
     w.held[0]?.()
@@ -147,17 +148,6 @@ describe('build_receipt', () => {
     expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Not converged: the user rejected finding r-1.1; undo any fix and record it rejected.')
   })
 
-  test('refused while a build_review is pending', async ($, on) => {
-    const w = await started($, on)
-    w.holdStart = true
-    const pending = call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
-    // settle() would wait for the held review_start; one step at a time lets it reach the hold.
-    for (let i = 0; i < 50 && w.held.length === 0; i++) await w.clock.advance(0)
-    expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Another build tool is running; try again when it returns.')
-    w.held[0]?.()
-    await pending
-  })
-
   test('refused while the upstream receipt does not hold', async ($, on) => {
     const w = await started($, on)
     await converge($, w, 'spec')
@@ -190,13 +180,16 @@ describe('build_review with receipts', () => {
     expect(text).toContain('=== untracked new.ts ===\n+new\n')
   })
 
-  test('refuses a surface it cannot capture whole', async ($, on) => {
+  test('refuses a surface it cannot capture whole, and keeps the receipt in place', async ($, on) => {
     const w = await started($, on)
     await converge($, w, 'spec')
+    await converge($, w, 'plan')
+    await converge($, w, 'diff')
     w.git.set(GIT.untracked, { stdout: 'nested/\0' })
     w.git.set(GIT.newFile('nested/'), { exitCode: 1, stdout: '', stderr: "error: Could not access 'nested/'" })
-    await converge($, w, 'plan')
     expect((await call($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })).deny).toBe("cannot diff untracked nested/: error: Could not access 'nested/'; add it to .gitignore or make it a submodule")
+    expect((w.store.get(`run:${KEY}`) as any).receipts.diff).not.toBe(undefined)
+    expect((await resultOf($, 'build_status')).receipts.diff).not.toBe('missing')
     w.git.set(GIT.untracked, { stdout: '' })
     w.git.set(GIT.worktree, { stdout: 'x', truncated: true })
     expect((await call($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })).deny).toBe('git diff printed more than 4 MiB')
@@ -209,14 +202,6 @@ describe('build_review with receipts', () => {
     expect((await call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })).deny).toContain('EACCES')
     expect(w.reviews.length).toBe(1)
     w.failStore = false
-    await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
-    expect(w.reviews.length).toBe(2)
-    expect((await resultOf($, 'build_status')).receipts.spec).toBe('missing')
-  })
-
-  test('a pending review has already withdrawn its receipt', async ($, on) => {
-    const w = await started($, on)
-    await converge($, w, 'spec')
     w.holdStart = true
     const pending = call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
     // settle() would wait for the held review_start; one step at a time lets it reach the hold.
@@ -224,26 +209,17 @@ describe('build_review with receipts', () => {
     expect((w.store.get(`run:${KEY}`) as any).receipts.spec).toBe(undefined)
     w.held[0]?.()
     await pending
+    expect(w.reviews.length).toBe(2)
+    expect((await resultOf($, 'build_status')).receipts.spec).toBe('missing')
   })
 
-  test('a failed collection leaves the receipt in place', async ($, on) => {
-    const w = await started($, on)
-    await converge($, w, 'spec')
-    await converge($, w, 'plan')
-    await converge($, w, 'diff')
-    w.git.set(GIT.untracked, { stdout: 'nested/\0' })
-    w.git.set(GIT.newFile('nested/'), { exitCode: 1, stdout: '', stderr: "error: Could not access 'nested/'" })
-    expect((await call($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })).deny).toContain('cannot diff untracked nested/')
-    expect((w.store.get(`run:${KEY}`) as any).receipts.diff).not.toBe(undefined)
-    expect((await resultOf($, 'build_status')).receipts.diff).not.toBe('missing')
-  })
-
-  test('a new run drops the earlier receipts', async ($, on) => {
+  test('a new run drops the earlier receipts and rounds', async ($, on) => {
     const w = await started($, on)
     await converge($, w, 'spec')
     expect((await resultOf($, 'build_status')).receipts.spec).toBe('valid')
     await call($, 'build_start', { base: 'main' })
     expect((await resultOf($, 'build_status')).receipts.spec).toBe('missing')
+    expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Checkpoint spec has no rounds in this session for this build run.')
   })
 })
 
@@ -286,7 +262,7 @@ describe('validity', () => {
     expect((await resultOf($, 'build_status')).receipts.diff).toBe('stale: what it certifies changed after it was written')
   })
 
-  test('a diff round sent from one checkout cannot be receipted from another', async ($, on) => {
+  test('a diff round or receipt from one checkout does not hold in another', async ($, on) => {
     const w = await started($, on)
     await converge($, w, 'spec')
     await converge($, w, 'plan')
@@ -296,10 +272,6 @@ describe('validity', () => {
     expect((await call($, 'build_receipt', { checkpoint: 'diff' })).deny).toBe('What this checkpoint certifies changed after its last round was sent; start another round.')
     w.git.set(GIT.top, { stdout: `${TOP}\n` })
     expect((await call($, 'build_receipt', { checkpoint: 'diff' })).deny).toBe(undefined)
-  })
-
-  test('a diff receipt does not hold in another checkout', async ($, on) => {
-    const w = await chain($, on)
     w.git.set(GIT.top, { stdout: 'C:/repo-wt\n' })
     expect((await resultOf($, 'build_status')).receipts.diff).toBe(`stale: it was written in ${TOP}`)
   })
@@ -331,13 +303,6 @@ describe('validity', () => {
     expect((await resultOf($, 'build_status')).receipts.spec.startsWith('unverifiable: ')).toBe(true)
   })
 
-  test('rounds from before a restart count for nothing', async ($, on) => {
-    const w = await started($, on)
-    await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
-    finish(w, 'r-1', 'READY')
-    await call($, 'build_start', { base: 'main' })
-    expect((await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).deny).toBe('Checkpoint spec has no rounds in this session for this build run.')
-  })
   test('rounds and the armed gate come back when the conversation is resumed, and only then', async ($, on) => {
     const w = await started($, on)
     const plans = async () => (await $.skill.prompt({ skill: 'superpowers-extended-cc:writing-plans', text: 'original' })).text
