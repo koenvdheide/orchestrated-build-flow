@@ -57,6 +57,9 @@ export function world(on: On) {
     // With holdStart, review_start waits here until the test releases it.
     holdStart: false,
     held: [] as (() => void)[],
+    // With holdRead, each file read waits here until the test releases it.
+    holdRead: false,
+    heldRead: [] as (() => void)[],
     // With holdArm, each write arming the session waits here until the test releases it.
     holdArm: false,
     heldArm: [] as (() => void)[],
@@ -71,7 +74,8 @@ export function world(on: On) {
 
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: w.sessionId }))
-  on('fs.read', ($, e) => {
+  on('fs.read', async ($, e) => {
+    if (w.holdRead) await new Promise<void>(resolve => w.heldRead.push(resolve))
     const path = e.path.replaceAll('\\', '/')
     return w.files.has(path) ? { value: w.files.get(path) as string } : { deny: `ENOENT: ${e.path}` }
   })

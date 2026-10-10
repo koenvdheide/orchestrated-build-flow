@@ -315,9 +315,10 @@ export const register: Register = on => {
       const artifact = cp === 'diff' ? null : input.artifact ?? null
       if (cp !== 'diff' && (artifact === null || !ABSOLUTE.test(artifact))) throw new Error(`build_review for ${cp} needs artifact, the ${cp} file's absolute path.`)
       const text = await material($, c, run, cp, artifact)
+      const fingerprint = await sha256(text)
+      if (gen !== generation) throw new Error('The conversation changed, so the round was not sent.')
       // Withdraw the receipt this round may overturn before the reviewer starts.
       if (run.receipts[cp]) await save($, c, run.id, r => ({ ...r, receipts: { ...r.receipts, [cp]: undefined } }))
-      const fingerprint = await sha256(text)
       // Codex runs in the session's directory, which may be a subdirectory; the diffs are relative to the top level.
       const paths = cp === 'diff' ? `\n\nPaths in the diffs are relative to ${c.top}; give each finding's file as an absolute path.` : ''
       const started = await $.tool.call({

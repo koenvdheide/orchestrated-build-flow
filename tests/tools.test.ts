@@ -392,6 +392,19 @@ describe('validity', () => {
     expect(await resultOf($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).toEqual({ checkpoint: 'spec', receipt: 'written' })
   })
 
+  test('a round whose conversation ended while it was prepared sends nothing', async ($, on) => {
+    const w = await started($, on)
+    w.holdRead = true
+    const pending = call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
+    await w.clock.settle()
+    w.holdRead = false
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's2'
+    w.heldRead.forEach(release => release())
+    expect((await pending).deny).toBe('The conversation changed, so the round was not sent.')
+    expect(w.reviews).toEqual([])
+  })
+
   test('a review that returns after its conversation ended records no round', async ($, on) => {
     const w = await started($, on)
     w.holdStart = true
