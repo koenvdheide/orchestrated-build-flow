@@ -37,7 +37,7 @@ Via the `agent-tools` marketplace:
 /reload-plugins
 ```
 
-Refresh later with `/plugin marketplace update agent-tools`, then `/plugin update orchestrated-build-flow@agent-tools` and `/reload-plugins`.
+Refresh later in `/plugin`: on the **Marketplaces** tab, select `agent-tools` and choose **Update marketplace**, which refreshes the catalogue and updates the plugins you installed from it.
 
 ## Usage
 
