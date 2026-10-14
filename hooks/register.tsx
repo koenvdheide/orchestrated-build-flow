@@ -212,7 +212,7 @@ async function registerTools($: Engine): Promise<void> {
   })
   await $.tool.register({
     name: 'build_review',
-    description: "Run one round of a checkpoint's Codex review (spec, plan or diff) through third-party-reviewers and return the review. Sends Codex exactly the material the receipt will certify and records the round. Follow the orchestrated-build-flow skill.",
+    description: "Run one round of a checkpoint's Codex review (spec, plan or diff) through third-party-reviewers: starts the review, records the round and returns the run as review_start does. Sends Codex exactly the material the receipt will certify. Read the review with review_results once it has ended (on third-party-reviewers' message, or at once if the run came back settled), before recording findings or calling build_receipt. Follow the orchestrated-build-flow skill.",
     inputSchema: {
       type: 'object',
       required: ['checkpoint', 'question', 'instructions'],
