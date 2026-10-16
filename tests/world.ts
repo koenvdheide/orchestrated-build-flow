@@ -3,11 +3,11 @@ import type { On } from 'claude-code'
 
 export const T = <N extends string>(name: N) => `mcp__orchestrated-build-flow__${name}` as const
 export const REVIEW_START = 'mcp__third-party-reviewers__review_start'
-export const TOP = 'C:/repo'
-export const KEY = 'C:/repo/.git'
+export const TOP = '/repo'
+export const KEY = `${TOP}/.git`
 export const BASE = 'b'.repeat(40)
-export const SPEC = 'C:/repo/docs/superpowers/specs/s.md'
-export const PLAN = 'C:/repo/docs/superpowers/plans/p.md'
+export const SPEC = `${TOP}/docs/superpowers/specs/s.md`
+export const PLAN = `${TOP}/docs/superpowers/plans/p.md`
 
 const DIFF = ['--binary', '--no-textconv', '--no-ext-diff']
 // The git argument vectors the mod runs (without `git`), keyed exactly, so one argument
@@ -76,7 +76,8 @@ export function world(on: On) {
   on('session.id', () => ({ value: w.sessionId }))
   on('fs.read', async ($, e) => {
     if (w.holdRead) await new Promise<void>(resolve => w.heldRead.push(resolve))
-    const path = e.path.replaceAll('\\', '/')
+    // Root-relative paths acquire a drive on Windows; keep one mock namespace.
+    const path = e.path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '')
     return w.files.has(path) ? { value: w.files.get(path) as string } : { deny: `ENOENT: ${e.path}` }
   })
   on('process.run', ($, e) => {

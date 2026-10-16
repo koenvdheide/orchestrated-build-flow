@@ -40,8 +40,8 @@ describe('snapshot and drift', () => {
 
 describe('notes', () => {
   test('stopNote', () => {
-    expect(stopNote('plan', { state: 'missing' }, 'C:/repo')).toBe(
-      'orchestrated-build-flow: the plan receipt is missing (checked in C:/repo). Run checkpoint 2 (plan-review) first, and do not follow the skill below until build_status shows it valid, unless the user has explicitly chosen to skip that checkpoint.',
+    expect(stopNote('plan', { state: 'missing' }, '/repo')).toBe(
+      'orchestrated-build-flow: the plan receipt is missing (checked in /repo). Run checkpoint 2 (plan-review) first, and do not follow the skill below until build_status shows it valid, unless the user has explicitly chosen to skip that checkpoint.',
     )
   })
 })
