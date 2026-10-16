@@ -48,13 +48,13 @@ describe('build_status', () => {
 describe('build_review', () => {
   test('sends codex the mode, the READY line and the captured material, records the round, and returns the review', async ($, on) => {
     const w = await started($, on)
-    expect(await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I', files: ['C:/repo/a.ts'] })).toEqual({ id: 'r-1', status: 'running', verdict: null, findings: [] })
+    expect(await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I', files: [`${TOP}/a.ts`] })).toEqual({ id: 'r-1', status: 'running', verdict: null, findings: [] })
     const sent = w.reviews[0] as any
     expect(sent.reviewer).toBe('codex')
     expect(sent.mode).toBe('red-team')
     expect(sent.question).toBe('Q')
     expect(sent.instructions).toBe(`I\n\n${READY_LINE}`)
-    expect(sent.artifact).toEqual({ text: `=== ${SPEC} ===\nspec v1\n`, files: ['C:/repo/a.ts'] })
+    expect(sent.artifact).toEqual({ text: `=== ${SPEC} ===\nspec v1\n`, files: [`${TOP}/a.ts`] })
     expect((await resultOf($, 'build_status')).rounds).toEqual({ spec: ['r-1'] })
   })
 
@@ -66,7 +66,7 @@ describe('build_review', () => {
     await call($, 'build_start', { base: 'main' })
     expect((await call($, 'build_review', { checkpoint: 'plan', artifact: PLAN, question: 'Q', instructions: 'I' })).deny).toBe('The spec receipt is missing; checkpoint plan reviews against it.')
     expect((await call($, 'build_review', { checkpoint: 'spec', artifact: 'docs/s.md', question: 'Q', instructions: 'I' })).deny).toBe("build_review for spec needs artifact, the spec file's absolute path.")
-    expect((await call($, 'build_review', { checkpoint: 'spec', artifact: 'C:/repo/none.md', question: 'Q', instructions: 'I' })).deny).toContain('ENOENT')
+    expect((await call($, 'build_review', { checkpoint: 'spec', artifact: `${TOP}/none.md`, question: 'Q', instructions: 'I' })).deny).toContain('ENOENT')
     expect(w.reviews).toEqual([])
   })
 
@@ -97,7 +97,7 @@ describe('build_receipt', () => {
   test('writes a receipt with the findings snapshot', async ($, on) => {
     const w = await started($, on)
     const { id: runId } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })
-    finish(w, runId, 'READY', [finding('r-1.1', { file: 'C:/repo/a.ts' })])
+    finish(w, runId, 'READY', [finding('r-1.1', { file: `${TOP}/a.ts` })])
     expect(await resultOf($, 'build_receipt', { checkpoint: 'spec', userApproved: true })).toEqual({ checkpoint: 'spec', receipt: 'written' })
     const receipt = (w.store.get(`run:${KEY}`) as any).receipts.spec
     expect(receipt.artifact).toBe(SPEC)
@@ -268,17 +268,17 @@ describe('validity', () => {
     await converge($, w, 'plan')
     const { id: runId } = await resultOf($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })
     finish(w, runId, 'READY')
-    w.git.set(GIT.top, { stdout: 'C:/repo-wt\n' })
+    w.git.set(GIT.top, { stdout: `${TOP}-wt\n` })
     expect((await call($, 'build_receipt', { checkpoint: 'diff' })).deny).toBe('What this checkpoint certifies changed after its last round was sent; start another round.')
     w.git.set(GIT.top, { stdout: `${TOP}\n` })
     expect((await call($, 'build_receipt', { checkpoint: 'diff' })).deny).toBe(undefined)
-    w.git.set(GIT.top, { stdout: 'C:/repo-wt\n' })
+    w.git.set(GIT.top, { stdout: `${TOP}-wt\n` })
     expect((await resultOf($, 'build_status')).receipts.diff).toBe(`stale: it was written in ${TOP}`)
   })
 
   test('a session in a subdirectory collects from the top level', async ($, on) => {
     const w = await started($, on)
-    w.cwd = 'C:/repo/sub'
+    w.cwd = `${TOP}/sub`
     w.git.set(GIT.untracked, { stdout: 'other/x.ts\0' })
     w.git.set(GIT.newFile('other/x.ts'), { exitCode: 1, stdout: '+x\n' })
     await converge($, w, 'spec')
