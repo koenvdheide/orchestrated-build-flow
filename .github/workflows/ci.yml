@@ -3,15 +3,44 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Validate plugin manifest JSON
         run: |
           for f in .claude-plugin/*.json; do
             echo "Validating $f"
             python3 -m json.tool "$f" > /dev/null
           done
+
+  test:
+    name: Mod tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.301
+      - name: Run all mod test suites
+        run: |
+          claude --version
+          claude plugin test .
