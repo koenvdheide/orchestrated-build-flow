@@ -8,7 +8,7 @@ One orchestrator owns the whole [superpowers](https://github.com/pcvelz/superpow
 
 Each checkpoint writes a receipt through the plugin's mod. Codex reviews exactly the material the receipt hashes, and the receipt is written only once the review has converged and nothing changed since. While the flow runs, a superpowers skill that would hand off past a missing or stale receipt opens with a note to run that checkpoint first. Receipts outlive the session, which is what makes the flow resumable: a dropped session continues at the first checkpoint whose receipt no longer holds. A conversation's review rounds are kept too, so quitting and resuming it keeps a checkpoint's loop; when a session starts, the plugin deletes the least recently saved conversations' rounds beyond the first 2 MiB.
 
-It uses the superpowers sub-skill files unmodified (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch), owning the transitions between them and the Codex gates, and overriding two of their routing questions: brainstorming's user-review gate and writing-plans' execution-method question. The skill documents the mechanics.
+It uses the superpowers sub-skill files unmodified (brainstorming, writing-plans, subagent-driven-development, finishing-a-development-branch), owning the transitions between them and the Codex gates, and overriding two of their routing questions: brainstorming's user-review gate and writing-plans' execution-method question. It also adds a blind Codex proposal to brainstorming's approaches step: Codex sees only the problem and its constraints, and you choose between its approach and Claude's. The skill documents the mechanics.
 
 ## The pipeline
 
