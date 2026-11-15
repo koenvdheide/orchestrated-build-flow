@@ -15,7 +15,7 @@ const DIFF = ['--binary', '--no-textconv', '--no-ext-diff']
 const argv = (...args: string[]) => JSON.stringify(args)
 export const GIT = {
   top: argv('rev-parse', '--show-toplevel'),
-  key: argv('rev-parse', '--path-format=absolute', '--git-common-dir'),
+  key: argv('rev-parse', '--path-format=absolute', '--git-dir'),
   base: (name: string) => argv('rev-parse', '--verify', '--end-of-options', `${name}^{commit}`),
   head: argv('rev-parse', 'HEAD'),
   log: argv('log', '--format=%H %s', `${BASE}..HEAD`),
@@ -48,6 +48,10 @@ export function world(on: On) {
       [GIT.worktree, { stdout: '' }],
       [GIT.untracked, { stdout: '' }],
     ]),
+    // Other checkouts of the repository, by directory: the two lookups run there answer these.
+    checkouts: new Map<string, { top: string; key: string }>(),
+    // fs.exists answers true unless the path is listed: false, or null to reject.
+    exists: new Map<string, boolean | null>(),
     // review_start calls the mod made, and their run ids r-1, r-2, …
     reviews: [] as Record<string, any>[],
     failStore: false,
@@ -70,23 +74,30 @@ export function world(on: On) {
       state.set('third-party-reviewers/runs', { value: runs, version: (state.get('third-party-reviewers/runs')?.version ?? 0) + 1 })
     },
   }
-  const top = () => (w.git.get(GIT.top)?.stdout ?? '').trim()
+  const top = () => w.checkouts.get(w.cwd)?.top ?? (w.git.get(GIT.top)?.stdout ?? '').trim()
+  // Root-relative paths acquire a drive on Windows; keep one mock namespace.
+  const local = (path: string) => path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '')
 
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: w.sessionId }))
   on('fs.read', async ($, e) => {
     if (w.holdRead) await new Promise<void>(resolve => w.heldRead.push(resolve))
-    // Root-relative paths acquire a drive on Windows; keep one mock namespace.
-    const path = e.path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '')
+    const path = local(e.path)
     return w.files.has(path) ? { value: w.files.get(path) as string } : { deny: `ENOENT: ${e.path}` }
+  })
+  on('fs.exists', ($, e) => {
+    const answer = w.exists.get(local(e.path))
+    return answer === null ? { deny: `EPERM: ${e.path}` } : { value: answer ?? true }
   })
   on('process.run', ($, e) => {
     const cmd = JSON.stringify(e.argv.slice(1))
     const fail = (stderr: string) => ({ value: { exitCode: 128, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } })
     if (e.argv[0] !== 'git') return { deny: `not installed: ${e.argv[0]}` }
     // Only the two lookups may run outside the top level; everything else must run there.
-    if (cmd !== GIT.top && cmd !== GIT.key && e.init?.cwd !== top()) return fail(`fatal: ran in ${e.init?.cwd}, not the top level`)
-    const a = w.git.get(cmd)
+    const lookup = cmd === GIT.top || cmd === GIT.key
+    if (!lookup && e.init?.cwd !== top()) return fail(`fatal: ran in ${e.init?.cwd}, not the top level`)
+    const other = lookup ? w.checkouts.get(e.init?.cwd ?? '') : undefined
+    const a = other ? { stdout: `${cmd === GIT.top ? other.top : other.key}\n` } : w.git.get(cmd)
     if (!a) return fail(`fatal: unexpected git ${cmd}`)
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: a.truncated ?? false, isStderrTruncated: false } }
   })

@@ -3,6 +3,11 @@ import { describe, expect, test } from 'claude-code/testing'
 import { READY_LINE, stopNote } from '../hooks/receipts'
 import { BASE, GIT, KEY, PLAN, SPEC, TOP, boot, call, converge, finding, finish, resultOf, started, world } from './world'
 
+const noRun = (top: string) => `No build run in ${top}; call build_start first, with from naming the checkout that holds the receipts if they were written in another worktree.`
+// A linked worktree of the repository at TOP.
+const WT = '/wt'
+const WT_KEY = `${KEY}/worktrees/wt`
+
 describe('build_start', () => {
   test('resolves the base to a commit and starts a run with no receipts', async ($, on) => {
     const w = world(on)
@@ -21,6 +26,56 @@ describe('build_start', () => {
     expect((await call($, 'build_start', { base: 'nope' })).deny).toBe('nope does not name a commit')
   })
 
+  test('two worktrees of one repository each keep their own run and receipts', async ($, on) => {
+    const w = world(on)
+    const other = 'd'.repeat(40)
+    const wtSpec = `${WT}/docs/superpowers/specs/s.md`
+    w.files.set(SPEC, 'spec v1')
+    w.files.set(wtSpec, 'the worktree spec')
+    w.checkouts.set(WT, { top: WT, key: WT_KEY })
+    w.git.set(GIT.base('feature'), { stdout: `${other}\n` })
+    await boot($, w)
+    await call($, 'build_start', { base: 'main' })
+    w.cwd = WT
+    await call($, 'build_start', { base: 'feature' })
+    w.cwd = TOP
+    await converge($, w, 'spec')
+    w.cwd = WT
+    const { id } = await resultOf($, 'build_review', { checkpoint: 'spec', artifact: wtSpec, question: 'Q', instructions: 'I' })
+    finish(w, id, 'READY')
+    await call($, 'build_receipt', { checkpoint: 'spec', userApproved: true })
+    const inWorktree = await resultOf($, 'build_status')
+    expect([inWorktree.checkout, inWorktree.base, inWorktree.receipts.spec]).toEqual([WT, other, 'valid'])
+    expect((w.store.get(`run:${WT_KEY}`) as any).receipts.spec.artifact).toBe(wtSpec)
+    w.cwd = TOP
+    const inMain = await resultOf($, 'build_status')
+    expect([inMain.checkout, inMain.base, inMain.receipts.spec]).toEqual([TOP, BASE, 'valid'])
+    expect((w.store.get(`run:${KEY}`) as any).receipts.spec.artifact).toBe(SPEC)
+  })
+
+  test('from carries a checkout\'s spec and plan receipts into a worktree made after them, and leaves that run alone', async ($, on) => {
+    const w = await started($, on)
+    await converge($, w, 'spec')
+    await converge($, w, 'plan')
+    await converge($, w, 'diff')
+    w.checkouts.set(WT, { top: WT, key: WT_KEY })
+    w.cwd = WT
+    expect((await call($, 'build_review', { checkpoint: 'diff', question: 'Q', instructions: 'I' })).deny).toBe(noRun(WT))
+    expect(await resultOf($, 'build_start', { base: 'main', from: TOP })).toEqual({ checkout: WT, base: BASE, from: TOP })
+    expect((await resultOf($, 'build_status')).receipts).toEqual({ spec: 'valid', plan: 'valid', diff: 'missing' })
+    expect((await converge($, w, 'diff')).deny).toBe(undefined)
+    expect((await resultOf($, 'build_status')).receipts.diff).toBe('valid')
+    w.cwd = TOP
+    expect((await resultOf($, 'build_status')).receipts).toEqual({ spec: 'valid', plan: 'valid', diff: 'valid' })
+  })
+
+  test('from refuses a checkout with no run', async ($, on) => {
+    const w = world(on)
+    w.checkouts.set(WT, { top: WT, key: WT_KEY })
+    await boot($, w)
+    expect((await call($, 'build_start', { base: 'main', from: WT })).deny).toBe(`No build run in ${WT} to start from.`)
+    expect(w.store.get(`run:${KEY}`)).toBe(undefined)
+  })
 })
 
 describe('build_status', () => {
@@ -62,7 +117,7 @@ describe('build_review', () => {
     const w = world(on)
     w.files.set(SPEC, 'spec v1')
     await boot($, w)
-    expect((await call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })).deny).toBe(`No build run in ${TOP}; call build_start first.`)
+    expect((await call($, 'build_review', { checkpoint: 'spec', artifact: SPEC, question: 'Q', instructions: 'I' })).deny).toBe(noRun(TOP))
     await call($, 'build_start', { base: 'main' })
     expect((await call($, 'build_review', { checkpoint: 'plan', artifact: PLAN, question: 'Q', instructions: 'I' })).deny).toBe('The spec receipt is missing; checkpoint plan reviews against it.')
     expect((await call($, 'build_review', { checkpoint: 'spec', artifact: 'docs/s.md', question: 'Q', instructions: 'I' })).deny).toBe("build_review for spec needs artifact, the spec file's absolute path.")
@@ -346,6 +401,21 @@ describe('validity', () => {
     w.store.set('armed:d', { savedAt: 0.5 })
     await boot($, w)
     expect([...w.store.keys()].sort()).toEqual(['armed:a', 'armed:c', 'rounds:a', 'rounds:c', 'rounds:s1', `run:${KEY}`])
+  })
+
+  test('session start deletes the run of a worktree git removed, and only that', async ($, on) => {
+    const w = world(on)
+    const kept = [KEY, `${KEY}/worktrees/live`, '/gone/.git', '/unmounted/.git/worktrees/a', '/unreadable/.git/worktrees/b']
+    for (const key of [...kept, WT_KEY]) w.store.set(`run:${key}`, { id: key, base: BASE, receipts: {} })
+    w.exists.set(WT_KEY, false)
+    // A main checkout's run stays even when its directory is gone.
+    w.exists.set('/gone/.git', false)
+    w.exists.set('/unmounted/.git', false)
+    w.exists.set('/unmounted/.git/worktrees/a', false)
+    w.exists.set('/unreadable/.git', null)
+    w.exists.set('/unreadable/.git/worktrees/b', false)
+    await boot($, w)
+    expect([...w.store.keys()].sort()).toEqual(kept.map(k => `run:${k}`).sort())
   })
 
   test('a round history holding a review third-party-reviewers no longer has starts over', async ($, on) => {
