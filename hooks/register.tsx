@@ -33,7 +33,7 @@ let generation = 0
 // build_review, one call at a time.
 const armedKey = (sessionId: string) => `armed:${sessionId}`
 const roundsKey = (sessionId: string) => `rounds:${sessionId}`
-// Half the store's 4 MiB, so the repositories' runs have room.
+// Half the store's 4 MiB, so the checkouts' runs have room.
 const STORE_BUDGET = 2 * 1024 * 1024
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -45,14 +45,20 @@ async function keep($: Engine, key: string, value: object): Promise<void> {
     .catch((err: unknown) => $.ui.toast(`Could not save the build state for resuming this conversation: ${message(err)}`))
 }
 
-// Drops the least recently saved conversations past the budget, both keys together, so none
-// comes back with rounds but unarmed; the current one stays.
+// Drops the runs of linked worktrees git has removed, and the least recently saved
+// conversations past the budget, both keys together, so none comes back with rounds but
+// unarmed; the current one stays.
 async function prune($: Engine): Promise<void> {
   const current = await $.session.id()
   const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value ?? null)).length
+  const found = (path: string) => $.fs.exists(path).catch(() => null)
   const others = new Map<string, { savedAt: number; size: number }>()
   let size = 0
   for (const key of await $.store.keys()) {
+    // A linked worktree's git dir is <repository>/worktrees/<name>. It counts as removed only
+    // while the repository is there, so a drive that is not mounted loses no runs.
+    const [, dir = '', repo = ''] = /^run:((.*)\/worktrees\/[^/]+)$/.exec(key) ?? []
+    if (repo && (await found(repo)) === true && (await found(dir)) === false) await $.store.delete(key)
     const id = /^(?:armed|rounds):(.*)$/.exec(key)?.[1]
     if (id === undefined) continue
     const saved = (await $.store.get(key)) as { savedAt: number }
@@ -99,22 +105,25 @@ async function git($: Engine, cwd: string, args: string[]): Promise<string> {
   return r.stdout
 }
 
-// The checkout the session works in: cwd follows a Bash `cd`, the session root does not.
-async function checkout($: Engine): Promise<Checkout> {
-  const cwd = await $.session.cwd()
+// The checkout at `dir`, by default the one the session works in: cwd follows a Bash `cd`, the
+// session root does not. Keyed by its git dir, so each worktree has its own run; a main
+// checkout's git dir is the repository's, the key runs had when one repository shared one run.
+async function checkout($: Engine, dir?: string): Promise<Checkout> {
+  const cwd = dir ?? (await $.session.cwd())
   const top = (await git($, cwd, ['rev-parse', '--show-toplevel'])).trim()
-  const key = (await git($, cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+  const key = (await git($, cwd, ['rev-parse', '--path-format=absolute', '--git-dir'])).trim()
   if (!ABSOLUTE.test(key)) throw new Error('git 2.31 or later is required')
   return { top, key }
 }
 
 const storeKey = (c: Checkout) => `run:${c.key}`
+const noRun = (c: Checkout) => `No build run in ${c.top}; call build_start first, with from naming the checkout that holds the receipts if they were written in another worktree.`
 
 async function loadRun($: Engine, c: Checkout): Promise<BuildRun | null> {
   return ((await $.store.get(storeKey(c))) as BuildRun | undefined) ?? null
 }
 
-// Writes the repository's run only while it is still the run this call began with.
+// Writes the checkout's run only while it is still the run this call began with.
 async function save($: Engine, c: Checkout, id: string, change: (run: BuildRun) => BuildRun): Promise<void> {
   const current = await loadRun($, c)
   if (current?.id !== id) throw new Error('The build run was restarted while this call ran; nothing was written.')
@@ -207,8 +216,15 @@ async function gateNote($: Engine, cp: Checkpoint): Promise<string | null> {
 async function registerTools($: Engine): Promise<void> {
   await $.tool.register({
     name: 'build_start',
-    description: "Start or restart this repository's orchestrated build run: resolves base to a commit and drops earlier receipts. Follow the orchestrated-build-flow skill.",
-    inputSchema: { type: 'object', required: ['base'], properties: { base: { type: 'string', description: 'the branch or commit the change is measured against' } } },
+    description: "Start or restart this checkout's orchestrated build run: resolves base to a commit and drops earlier receipts, or with from carries over another checkout's spec and plan receipts. Follow the orchestrated-build-flow skill.",
+    inputSchema: {
+      type: 'object',
+      required: ['base'],
+      properties: {
+        base: { type: 'string', description: 'the branch or commit the change is measured against' },
+        from: { type: 'string', description: "absolute path of the checkout whose spec and plan receipts the run carries over, for a worktree created after they were written" },
+      },
+    },
   })
   await $.tool.register({
     name: 'build_review',
@@ -236,7 +252,7 @@ async function registerTools($: Engine): Promise<void> {
   })
   await $.tool.register({
     name: 'build_status',
-    description: "This repository's build run: each checkpoint receipt valid, stale, missing or unverifiable, and this session's review rounds.",
+    description: "This checkout's build run: each checkpoint receipt valid, stale, missing or unverifiable, and this session's review rounds.",
     inputSchema: { type: 'object', properties: {} },
   })
 }
@@ -286,14 +302,19 @@ export const register: Register = on => {
   on('tool.call', { tool: T('build_start') }, async ($, e) =>
     exclusive(async () => {
       await arm($)
-      const { base } = e as unknown as { base: string }
+      const { base, from } = e as unknown as { base: string; from?: string }
       const c = await checkout($)
       const commit = await git($, c.top, ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`]).catch(() => {
         throw new Error(`${base} does not name a commit`)
       })
-      const run: BuildRun = { id: crypto.randomUUID(), base: commit.trim(), receipts: {} }
+      // Only the documents' receipts carry over: a diff receipt certifies its own checkout.
+      const f = from === undefined ? null : await checkout($, from)
+      const source = f && (await loadRun($, f))
+      if (f && !source) throw new Error(`No build run in ${f.top} to start from.`)
+      const receipts = source ? { spec: source.receipts.spec, plan: source.receipts.plan } : {}
+      const run: BuildRun = { id: crypto.randomUUID(), base: commit.trim(), receipts }
       await $.store.set(storeKey(c), run)
-      return { result: JSON.stringify({ checkout: c.top, base: run.base }) }
+      return { result: JSON.stringify({ checkout: c.top, base: run.base, from: f?.top }) }
     }),
   )
 
@@ -306,7 +327,7 @@ export const register: Register = on => {
       const cp = input.checkpoint
       const c = await checkout($)
       const run = await loadRun($, c)
-      if (!run) throw new Error(`No build run in ${c.top}; call build_start first.`)
+      if (!run) throw new Error(noRun(c))
       const up = UPSTREAM[cp]
       if (up !== null) {
         const u = await checked($, c, run, up, await liveRuns($))
@@ -354,7 +375,7 @@ export const register: Register = on => {
       if (cp === 'spec' && userApproved !== true) throw new Error('A spec receipt needs userApproved: true, after the user approved the converged spec.')
       const c = await checkout($)
       const run = await loadRun($, c)
-      if (!run) throw new Error(`No build run in ${c.top}; call build_start first.`)
+      if (!run) throw new Error(noRun(c))
       const r = (await read($, rounds))[cp]
       if (!r || r.build !== run.id) throw new Error(`Checkpoint ${cp} has no rounds in this session for this build run.`)
       const live = await liveRuns($)

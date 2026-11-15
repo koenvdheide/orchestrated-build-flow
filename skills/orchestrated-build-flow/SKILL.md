@@ -27,7 +27,7 @@ Never treat an artifact's *presence* as proof its checkpoint ran. Only a valid r
 | **3 Checkpoint 1: spec** | Convergence loop with `build_review` checkpoint `spec`, artifact the spec. On convergence, present the converged spec for a **single user approval**. This approval replaces routing through brainstorming's own user-review gate — do not also run that gate. Then `build_receipt` with `userApproved: true`. | brainstorming reported a spec it considers finished |
 | **4 Plan** | Invoke writing-plans. Its execution-method question is the trigger for checkpoint 2: run that first. | `build_status`: spec receipt valid |
 | **5 Checkpoint 2: plan** | Convergence loop with `build_review` checkpoint `plan`, artifact the plan; the spec goes with it. Then `build_receipt`. | writing-plans reported a plan it considers finished |
-| **6 Execute (SDD)** | Pin SDD: skip writing-plans' execution-method question (no parallel-session offer, no manual execution). Worktree handling is inherited from using-git-worktrees / SDD; do not re-invent it. | `build_status`: plan receipt valid |
+| **6 Execute (SDD)** | Pin SDD: skip writing-plans' execution-method question (no parallel-session offer, no manual execution). Worktree handling is inherited from using-git-worktrees / SDD; do not re-invent it. If that moves the session into a new worktree, call `build_start` there with `base` the commit `build_status` reported and `from` the checkout holding the plan receipt. | `build_status`: plan receipt valid |
 | **7 Checkpoint 3: diff** | Convergence loop with `build_review` checkpoint `diff`: the tool collects the change surface (commits since the base, staged and unstaged changes, untracked files) in the current checkout, with the plan. Supplements SDD's own final reviewer; does not replace it. Then `build_receipt`. | SDD reported its tasks complete **and** its final reviewer ran. Without that, re-enter phase 6 rather than reviewing partial work |
 | **8 Finish** | `finishing-a-development-branch` for the merge, PR and cleanup decision. Stop before any public publish step — the final click is the user's. | `build_status`: diff receipt valid |
 
@@ -40,7 +40,7 @@ Phase 6 always uses a subagent. Multi-task or non-trivial plans use SDD's full p
 - When a round returns READY with no open findings, call `build_receipt`. If refused, address the named cause and retry or run another round.
 - Before each checkpoint, verify its producer met the table's entry requirement; otherwise re-enter the producer phase. A receipt proves review, not producer completion: a dropped session can leave a half-written artifact.
 - For checkpoint 3, route non-trivial findings to a fresh fix-subagent with a narrow patch brief and required validation, following SDD. Apply and re-verify only trivial fixes directly (e.g. a one-word doc typo).
-- Work from inside the build's repository: the tools and the gate use the git checkout of the session's current directory; `build_status` and the stop note name the checkout they checked.
+- Work from inside the build's checkout: each checkout (the main one or a worktree) has its own run, and the tools and the gate use the one of the session's current directory; `build_status` and the stop note name the checkout they checked.
 
 ## Failure & resume
 
